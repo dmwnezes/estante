@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Estante" parent="android:Theme.Material.NoActionBar">
+    <!-- AppCompat porque a janela de escolher a TV (Chromecast) exige; o resto do app é Compose. -->
+    <style name="Theme.Estante" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowBackground">@drawable/window_bg</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="colorAccent">#FFF0A94B</item>
+        <item name="colorPrimary">#FF2A1F1A</item>
     </style>
 </resources>

@@ -15,8 +15,8 @@ import java.io.File
 import java.util.UUID
 
 /**
- * A estante inteira (vídeos e listas), guardada num arquivo JSON dentro do app.
- * Toda mudança atualiza [state] na hora e grava o arquivo em segundo plano.
+ * A estante inteira (vídeos, séries, listas e pastas sincronizadas), guardada num JSON
+ * dentro do app. Toda mudança atualiza [state] na hora e grava o arquivo em segundo plano.
  */
 class Library(private val file: File, private val clock: () -> Long = System::currentTimeMillis) {
 
@@ -49,14 +49,25 @@ class Library(private val file: File, private val clock: () -> Long = System::cu
 
     fun newId(): String = UUID.randomUUID().toString()
 
+    /** Próxima posição no fim de uma prateleira (ordem manual). */
+    private fun nextOrder(s: LibraryState, shelf: String): Double =
+        (s.shelfItems.filter { it.shelf == shelf }.maxOfOrNull { it.order } ?: 0.0) + 1.0
+
     // ---------- vídeos ----------
 
     /** Coloca vídeos novos na estante (ignora os que já estão lá). Devolve os que entraram. */
     fun add(items: List<Video>): List<Video> {
-        val existing = current.videos.map { it.source to it.ref }.toSet()
-        val fresh = items.filter { (it.source to it.ref) !in existing }
-            .mapIndexed { i, v -> v.copy(addedAt = if (v.addedAt > 0) v.addedAt else clock() + i) }
-        if (fresh.isNotEmpty()) change { it.copy(videos = it.videos + fresh) }
+        var fresh: List<Video> = emptyList()
+        change { s ->
+            val existing = s.videos.map { it.source to it.ref }.toSet()
+            val orders = mutableMapOf<String, Double>()
+            fresh = items.filter { (it.source to it.ref) !in existing }.distinctBy { it.source to it.ref }
+                .mapIndexed { i, v ->
+                    val o = if (v.boxId != null) 0.0 else (orders[v.shelf] ?: nextOrder(s, v.shelf)).also { orders[v.shelf] = it + 1.0 }
+                    v.copy(addedAt = if (v.addedAt > 0) v.addedAt else clock() + i, order = o)
+                }
+            if (fresh.isEmpty()) s else s.copy(videos = s.videos + fresh)
+        }
         return fresh
     }
 
@@ -89,7 +100,105 @@ class Library(private val file: File, private val clock: () -> Long = System::cu
 
     fun renameShelf(from: String, to: String) {
         val name = to.trim().ifBlank { return }
-        change { s -> s.copy(videos = s.videos.map { if (it.shelf == from) it.copy(shelf = name) else it }) }
+        change { s ->
+            s.copy(
+                videos = s.videos.map { if (it.shelf == from) it.copy(shelf = name) else it },
+                boxes = s.boxes.map { if (it.shelf == from) it.copy(shelf = name) else it },
+            )
+        }
+    }
+
+    /**
+     * Arrastar e soltar: põe o item (DVD ou série) na prateleira [shelf], logo antes de
+     * [beforeId] (ou no fim, se nulo). Renumera a prateleira para a ordem ficar fixa.
+     */
+    fun move(itemId: String, shelf: String, beforeId: String?) = change { s ->
+        val items = s.shelfItems
+        val moving = items.firstOrNull { it.id == itemId } ?: return@change s
+        val sorted = items.filter { it.shelf == shelf && it.id != itemId }.sortedBy(SortOrder.MANUAL).toMutableList()
+        val at = beforeId?.let { b -> sorted.indexOfFirst { it.id == b } }?.takeIf { it >= 0 } ?: sorted.size
+        sorted.add(at, moving)
+        val newOrder = sorted.mapIndexed { i, it -> it.id to (i + 1).toDouble() }.toMap()
+        s.copy(
+            videos = s.videos.map { v -> newOrder[v.id]?.let { v.copy(order = it, shelf = shelf) } ?: v },
+            boxes = s.boxes.map { b -> newOrder[b.id]?.let { b.copy(order = it, shelf = shelf) } ?: b },
+        )
+    }
+
+    /** Fixa a ordem atual (por título, por exemplo) como "minha ordem" antes de começar a arrastar. */
+    fun freezeOrder(order: SortOrder) = change { s ->
+        val newOrder = s.shelfItems.groupBy { it.shelf }.values
+            .flatMap { list -> list.sortedBy(order).mapIndexed { i, it -> it.id to (i + 1).toDouble() } }.toMap()
+        s.copy(
+            videos = s.videos.map { v -> newOrder[v.id]?.let { v.copy(order = it) } ?: v },
+            boxes = s.boxes.map { b -> newOrder[b.id]?.let { b.copy(order = it) } ?: b },
+        )
+    }
+
+    // ---------- séries ----------
+
+    fun createBox(title: String, shelf: String, folderId: String? = null): Box {
+        var box = Box(newId(), title.trim().ifBlank { "Série" }, shelf = shelf, addedAt = clock(), folderId = folderId)
+        change { s ->
+            box = box.copy(order = nextOrder(s, shelf))
+            s.copy(boxes = s.boxes + box)
+        }
+        return box
+    }
+
+    fun updateBox(id: String, block: (Box) -> Box) = change { s ->
+        s.copy(boxes = s.boxes.map { if (it.id == id) block(it) else it })
+    }
+
+    fun setBoxCover(id: String, path: String?) {
+        val old = current.box(id)?.cover
+        if (old != null && old != path) runCatching { File(old).delete() }
+        updateBox(id) { it.copy(cover = path) }
+    }
+
+    /** Junta vídeos que já estão na estante numa série. */
+    fun putInBox(boxId: String, videoIds: List<String>) = change { s ->
+        s.copy(videos = s.videos.map { if (it.id in videoIds) it.copy(boxId = boxId) else it })
+    }
+
+    fun takeOutOfBox(videoId: String) = change { s ->
+        val v = s.video(videoId) ?: return@change s
+        val shelf = v.boxId?.let { s.box(it)?.shelf } ?: v.shelf
+        s.copy(videos = s.videos.map { if (it.id == videoId) it.copy(boxId = null, shelf = shelf, order = nextOrder(s, shelf)) else it })
+    }
+
+    /**
+     * Desfaz a série. [keepEpisodes] = os episódios voltam como DVDs soltos na mesma prateleira;
+     * senão saem da estante junto.
+     */
+    fun deleteBox(id: String, keepEpisodes: Boolean) {
+        val s0 = current
+        val box = s0.box(id) ?: return
+        box.cover?.let { runCatching { File(it).delete() } }
+        if (!keepEpisodes) s0.episodesOf(id).forEach { e -> e.cover?.let { runCatching { File(it).delete() } } }
+        change { s ->
+            val epIds = s.videos.filter { it.boxId == id }.map { it.id }.toSet()
+            var o = nextOrder(s, box.shelf)
+            s.copy(
+                boxes = s.boxes.filterNot { it.id == id },
+                syncs = s.syncs.filterNot { it.boxId == id },
+                videos = if (keepEpisodes) s.videos.map { if (it.id in epIds) it.copy(boxId = null, shelf = box.shelf, order = o++) else it }
+                else s.videos.filterNot { it.id in epIds },
+                playlists = if (keepEpisodes) s.playlists else s.playlists.map { p -> p.copy(videoIds = p.videoIds.filterNot { it in epIds }) },
+            )
+        }
+    }
+
+    // ---------- pastas sincronizadas ----------
+
+    fun addSync(folder: SyncFolder) = change { s ->
+        s.copy(syncs = s.syncs.filterNot { it.folderId == folder.folderId } + folder)
+    }
+
+    fun removeSync(folderId: String) = change { s -> s.copy(syncs = s.syncs.filterNot { it.folderId == folderId }) }
+
+    fun markSynced(folderId: String) = change { s ->
+        s.copy(syncs = s.syncs.map { if (it.folderId == folderId) it.copy(lastSync = clock()) else it })
     }
 
     // ---------- listas ----------

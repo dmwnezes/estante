@@ -49,11 +49,17 @@ class Covers(context: Context, private val http: OkHttpClient) {
     }
 
     /** Miniatura que o Google Drive gera para o vídeo (pedida em tamanho maior). */
-    suspend fun fromDriveThumbnail(link: String?): String? = withContext(Dispatchers.IO) {
-        if (link.isNullOrBlank()) return@withContext null
+    suspend fun fromDriveThumbnail(link: String?): String? {
+        if (link.isNullOrBlank()) return null
+        val big = if (Regex("=s\\d+$").containsMatchIn(link)) link.replace(Regex("=s\\d+$"), "=s1000") else link
+        return fromUrl(big)
+    }
+
+    /** Baixa uma imagem (pôster do TMDB, miniatura do Drive) e guarda como capa. */
+    suspend fun fromUrl(url: String?): String? = withContext(Dispatchers.IO) {
+        if (url.isNullOrBlank()) return@withContext null
         runCatching {
-            val big = if (Regex("=s\\d+$").containsMatchIn(link)) link.replace(Regex("=s\\d+$"), "=s1000") else link
-            http.newCall(Request.Builder().url(big).build()).execute().use { resp ->
+            http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
                 if (!resp.isSuccessful) return@use null
                 val bytes = resp.body?.bytes() ?: return@use null
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let(::save)

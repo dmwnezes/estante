@@ -18,6 +18,7 @@ data class DriveItem(
     val thumbnail: String? = null,
     val sizeBytes: Long = 0,
     val durationMs: Long = 0,
+    val parents: List<String> = emptyList(),
 ) {
     val isFolder: Boolean get() = mimeType == DriveQuery.FOLDER
 }
@@ -36,7 +37,22 @@ object DriveQuery {
 
     fun search(text: String) = "name contains '${escape(text.trim())}' and trashed = false and mimeType contains 'video/'"
 
-    const val FIELDS = "nextPageToken,files(id,name,mimeType,thumbnailLink,size,videoMediaMetadata(durationMillis))"
+    const val FIELDS = "nextPageToken,files(id,name,mimeType,thumbnailLink,size,videoMediaMetadata(durationMillis),parents)"
+
+    /** Arquivos de legenda dentro da pasta. */
+    fun subtitles(folderId: String) =
+        "'${escape(folderId)}' in parents and trashed = false and (name contains '.srt' or name contains '.vtt' or name contains '.SRT' or name contains '.VTT')"
+
+    /**
+     * Escolhe a legenda que combina com o vídeo: mesmo nome-base (ex.: "Filme.mp4" ↔ "Filme.pt-BR.srt");
+     * se a pasta tiver uma legenda só e um vídeo só, usa ela.
+     */
+    fun matchSubtitle(videoName: String, subs: List<DriveItem>, videosInFolder: Int): DriveItem? {
+        val base = videoName.substringBeforeLast('.').lowercase()
+        val exact = subs.filter { it.name.lowercase().startsWith(base) }
+        return exact.sortedByDescending { it.name.lowercase().contains("pt") }.firstOrNull()
+            ?: subs.singleOrNull()?.takeIf { videosInFolder <= 1 }
+    }
 
     fun parseItems(json: JSONObject): List<DriveItem> {
         val files = json.optJSONArray("files") ?: return emptyList()
@@ -49,6 +65,7 @@ object DriveQuery {
                 thumbnail = f.optString("thumbnailLink").ifBlank { null },
                 sizeBytes = f.optString("size").toLongOrNull() ?: 0L,
                 durationMs = f.optJSONObject("videoMediaMetadata")?.optString("durationMillis")?.toLongOrNull() ?: 0L,
+                parents = f.optJSONArray("parents")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
             )
         }
     }
@@ -154,17 +171,30 @@ class DriveClient(private val http: OkHttpClient) {
     suspend fun search(text: String) = list(DriveQuery.search(text), orderBy = "name_natural")
 
     /** Todos os vídeos dentro da pasta e das subpastas (até [maxDepth] níveis). */
-    suspend fun videosDeep(folderId: String, maxDepth: Int = 3): List<DriveItem> {
+    suspend fun videosDeep(folderId: String, maxDepth: Int = 3): List<DriveItem> = videosDeepNamed(folderId, "", maxDepth).map { it.first }
+
+    /** Igual a [videosDeep], junto com o nome da subpasta onde cada vídeo está (para achar a temporada). */
+    suspend fun videosDeepNamed(folderId: String, folderName: String, maxDepth: Int = 3): List<Pair<DriveItem, String>> {
         val items = children(folderId)
-        val videos = items.filterNot { it.isFolder }.toMutableList()
-        if (maxDepth > 0) items.filter { it.isFolder }.forEach { videos += videosDeep(it.id, maxDepth - 1) }
+        val videos = items.filter { !it.isFolder && it.mimeType.startsWith("video/") }.map { it to folderName }.toMutableList()
+        if (maxDepth > 0) items.filter { it.isFolder }.forEach { videos += videosDeepNamed(it.id, it.name, maxDepth - 1) }
         return videos
+    }
+
+    /** Procura uma legenda .srt/.vtt ao lado do vídeo no Drive. */
+    suspend fun findSubtitle(fileId: String): DriveItem? {
+        val f = file(fileId)
+        val parent = f.parents.firstOrNull() ?: return null
+        val subs = list(DriveQuery.subtitles(parent), orderBy = "name_natural")
+        if (subs.isEmpty()) return null
+        val videos = runCatching { children(parent).count { !it.isFolder } }.getOrDefault(2)
+        return DriveQuery.matchSubtitle(f.name, subs, videos)
     }
 
     /** Dados de um arquivo (para buscar a miniatura de novo). */
     suspend fun file(id: String): DriveItem {
         val url = "$API/files/$id".toHttpUrl().newBuilder()
-            .addQueryParameter("fields", "id,name,mimeType,thumbnailLink,size,videoMediaMetadata(durationMillis)")
+            .addQueryParameter("fields", "id,name,mimeType,thumbnailLink,size,videoMediaMetadata(durationMillis),parents")
             .addQueryParameter("supportsAllDrives", "true")
             .build()
         return DriveQuery.parseItems(JSONObject().put("files", org.json.JSONArray().put(get(url)))).first()

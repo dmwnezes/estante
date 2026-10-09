@@ -71,6 +71,13 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-ui:$media3")
     implementation("androidx.media3:media3-datasource-okhttp:$media3")
+    implementation("androidx.media3:media3-session:$media3")
+    implementation("androidx.media3:media3-cast:$media3")
+
+    // Botão de enviar para a TV (Chromecast)
+    implementation("androidx.mediarouter:mediarouter:1.7.0")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
 
     // Login do Google (só para ler o Drive)
     implementation("com.google.android.gms:play-services-auth:21.3.0")

@@ -161,6 +161,7 @@ private fun DriveBrowser(onBack: () -> Unit, onAdded: (Int) -> Unit) {
     var reload by remember { mutableStateOf(0) }
     val selected = remember { mutableStateMapOf<String, DriveItem>() }
     var askShelf by remember { mutableStateOf<List<DriveItem>?>(null) }
+    var askFolder by remember { mutableStateOf<FolderImport?>(null) }
     var gathering by remember { mutableStateOf(false) }
 
     val folderId = path.last().first
@@ -261,10 +262,10 @@ private fun DriveBrowser(onBack: () -> Unit, onAdded: (Int) -> Unit) {
                                 onAddFolder = {
                                     gathering = true
                                     scope.launch {
-                                        val all = runCatching { AppGraph.drive.videosDeep(item.id) }.getOrDefault(emptyList())
-                                            .filterNot { AppGraph.library.isOnShelf(Source.DRIVE, it.id) }
+                                        val all = runCatching { AppGraph.drive.videosDeepNamed(item.id, item.name) }.getOrDefault(emptyList())
+                                            .filterNot { AppGraph.library.isOnShelf(Source.DRIVE, it.first.id) }
                                         gathering = false
-                                        if (all.isEmpty()) error = "Essa pasta não tem vídeos novos." else askShelf = all
+                                        if (all.isEmpty()) error = "Essa pasta não tem vídeos novos." else askFolder = FolderImport(item.id, item.name, all)
                                     }
                                 },
                             )
@@ -288,7 +289,7 @@ private fun DriveBrowser(onBack: () -> Unit, onAdded: (Int) -> Unit) {
         ShelfChoiceDialog(
             count = list.size,
             shelves = library.shelves,
-            onConfirm = { shelf ->
+            onConfirm = { shelf, _, _ ->
                 val n = Importer.addDrive(list, shelf)
                 askShelf = null
                 selected.clear()
@@ -297,7 +298,32 @@ private fun DriveBrowser(onBack: () -> Unit, onAdded: (Int) -> Unit) {
             onDismiss = { askShelf = null },
         )
     }
+    askFolder?.let { f ->
+        // Pasta com subpastas ou com vários vídeos numerados parece série.
+        val looksLikeSeries = f.videos.map { it.second }.distinct().size > 1 ||
+            f.videos.count { com.dmwnezes.estante.data.Episodes.parse(it.first.name).episode > 0 } >= 2
+        ShelfChoiceDialog(
+            count = f.videos.size,
+            shelves = library.shelves,
+            allowSeries = true, seriesName = com.dmwnezes.estante.data.titleFromFileName(f.name),
+            startAsSeries = looksLikeSeries, allowSync = true,
+            onConfirm = { shelf, series, sync ->
+                val n = when {
+                    series != null -> Importer.addDriveSeries(f.id, series, f.videos, shelf, sync)
+                    sync -> Importer.syncFolderToShelf(f.id, f.name, shelf, f.videos.map { it.first })
+                    else -> Importer.addDrive(f.videos.map { it.first }, shelf)
+                }
+                askFolder = null
+                selected.clear()
+                onAdded(n)
+            },
+            onDismiss = { askFolder = null },
+        )
+    }
 }
+
+/** Pasta escolhida com "Tudo": vídeos e a subpasta de cada um. */
+private data class FolderImport(val id: String, val name: String, val videos: List<Pair<DriveItem, String>>)
 
 @Composable
 private fun DriveRow(item: DriveItem, checked: Boolean, onShelf: Boolean, onClick: () -> Unit, onAddFolder: () -> Unit) {

@@ -4,6 +4,8 @@ import android.content.Context
 import coil.ImageLoader
 import com.dmwnezes.estante.data.Covers
 import com.dmwnezes.estante.data.Library
+import com.dmwnezes.estante.data.Tmdb
+import android.content.SharedPreferences
 import com.dmwnezes.estante.drive.DriveAuth
 import com.dmwnezes.estante.drive.DriveClient
 import com.dmwnezes.estante.drive.DriveTokenInterceptor
@@ -21,6 +23,8 @@ object AppGraph {
     lateinit var library: Library; private set
     lateinit var covers: Covers; private set
     lateinit var images: ImageLoader; private set
+    lateinit var tmdb: Tmdb; private set
+    lateinit var prefs: SharedPreferences; private set
 
     private var ready = false
 
@@ -37,6 +41,8 @@ object AppGraph {
         library = Library(File(app.filesDir, "estante.json"))
         covers = Covers(app, driveHttp)
         images = ImageLoader.Builder(app).okHttpClient(driveHttp).crossfade(true).build()
+        tmdb = Tmdb(app, http)
+        prefs = app.getSharedPreferences("app", Context.MODE_PRIVATE)
         ready = true
     }
 }

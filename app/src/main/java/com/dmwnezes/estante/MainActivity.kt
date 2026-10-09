@@ -1,11 +1,10 @@
 package com.dmwnezes.estante
 
-import android.content.Context
 import android.content.pm.ActivityInfo
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -17,20 +16,32 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.core.app.PictureInPictureModeChangedInfo
+import androidx.core.util.Consumer
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.dmwnezes.estante.data.Importer
+import com.dmwnezes.estante.data.ShelfItem
 import com.dmwnezes.estante.data.SortOrder
 import com.dmwnezes.estante.data.Video
+import com.dmwnezes.estante.player.Pip
 import com.dmwnezes.estante.player.PlayerScreen
 import com.dmwnezes.estante.ui.AddToPlaylistDialog
+import com.dmwnezes.estante.ui.BoxEditDialog
+import com.dmwnezes.estante.ui.BoxScreen
 import com.dmwnezes.estante.ui.DrivePickerScreen
 import com.dmwnezes.estante.ui.EditVideoDialog
 import com.dmwnezes.estante.ui.EstanteTheme
@@ -39,13 +50,19 @@ import com.dmwnezes.estante.ui.PlaylistsScreen
 import com.dmwnezes.estante.ui.SettingsScreen
 import com.dmwnezes.estante.ui.ShelfChoiceDialog
 import com.dmwnezes.estante.ui.ShelfScreen
+import com.dmwnezes.estante.ui.ShelfThemes
 import com.dmwnezes.estante.ui.SplashCredits
 import com.dmwnezes.estante.ui.VideoSheet
 import com.dmwnezes.estante.update.Release
 import com.dmwnezes.estante.update.UpdateDialog
 import com.dmwnezes.estante.update.Updater
+import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() {
+/** FragmentActivity porque a janela de escolher a TV (Chromecast) precisa. */
+class MainActivity : FragmentActivity() {
+
+    private val pipListener = Consumer<PictureInPictureModeChangedInfo> { Pip.inPip = it.isInPictureInPictureMode }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
@@ -55,7 +72,20 @@ class MainActivity : ComponentActivity() {
         // A estante fica em pé; só o player deita a tela.
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         AppGraph.init(this)
+        ShelfThemes.load()
+        addOnPictureInPictureModeChangedListener(pipListener)
         setContent { EstanteTheme { EstanteApp() } }
+    }
+
+    override fun onDestroy() {
+        removeOnPictureInPictureModeChangedListener(pipListener)
+        super.onDestroy()
+    }
+
+    /** Botão início com vídeo tocando: vira janelinha (no Android 12+ isso já é automático). */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Pip.playing && Build.VERSION.SDK_INT < 31) Pip.enter(this)
     }
 }
 
@@ -65,6 +95,7 @@ sealed interface Screen {
     data object Drive : Screen
     data object Playlists : Screen
     data class PlaylistDetail(val id: String) : Screen
+    data class Series(val id: String) : Screen
     data object Settings : Screen
     data class Player(val queue: List<String>, val start: Int, val fromStart: Boolean) : Screen
 }
@@ -72,9 +103,10 @@ sealed interface Screen {
 @Composable
 fun EstanteApp() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val library = AppGraph.library
     val state by library.state.collectAsState()
-    val prefs = remember { context.getSharedPreferences("app", Context.MODE_PRIVATE) }
+    val prefs = AppGraph.prefs
 
     var splash by rememberSaveable { mutableStateOf(true) }
     val stack = remember { mutableStateListOf<Screen>(Screen.Shelf) }
@@ -85,6 +117,7 @@ fun EstanteApp() {
     var sort by remember { mutableStateOf(runCatching { SortOrder.valueOf(prefs.getString("sort", "")!!) }.getOrDefault(SortOrder.TITLE)) }
     var openVideo by remember { mutableStateOf<String?>(null) }
     var editVideo by remember { mutableStateOf<String?>(null) }
+    var editBox by remember { mutableStateOf<String?>(null) }
     var listVideo by remember { mutableStateOf<String?>(null) }
     var localPicked by remember { mutableStateOf<List<Uri>?>(null) }
 
@@ -93,10 +126,22 @@ fun EstanteApp() {
     var newerAvailable by remember { mutableStateOf(false) }
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+    fun addedMsg(n: Int) = when (n) { 0 -> "Esses vídeos já estavam na estante"; 1 -> "1 vídeo na estante"; else -> "$n vídeos na estante" }
+
+    fun setSort(o: SortOrder) { sort = o; prefs.edit().putString("sort", o.name).apply() }
 
     fun play(queue: List<Video>, start: Int = 0, fromStart: Boolean = false) {
         if (queue.isEmpty()) return
         go(Screen.Player(queue.map { it.id }, start, fromStart))
+    }
+
+    /** Episódio de série: toca ele e segue para os próximos da série. */
+    fun resume(v: Video) {
+        val boxId = v.boxId
+        if (boxId != null && state.box(boxId) != null) {
+            val eps = state.episodesOf(boxId)
+            play(eps, eps.indexOfFirst { it.id == v.id }.coerceAtLeast(0))
+        } else play(listOf(v))
     }
 
     val pickLocal = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -113,6 +158,19 @@ fun EstanteApp() {
                 if (prefs.getString("skippedUpdate", null) != r.tag) foundUpdate = r
             }
         }
+    }
+
+    // Pastas sincronizadas: verifica ao abrir e ao voltar para o app (no máximo a cada 30 min).
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_START) scope.launch {
+                val n = runCatching { Importer.syncAll() }.getOrDefault(0)
+                if (n > 0) toast(if (n == 1) "1 vídeo novo das pastas sincronizadas" else "$n vídeos novos das pastas sincronizadas")
+            }
+        }
+        lifecycle.addObserver(obs)
+        onDispose { lifecycle.removeObserver(obs) }
     }
 
     if (splash) {
@@ -132,46 +190,53 @@ fun EstanteApp() {
             Screen.Shelf -> ShelfScreen(
                 state = state,
                 sort = sort,
-                onSort = { sort = it; prefs.edit().putString("sort", it.name).apply() },
-                onOpen = { openVideo = it.id },
-                onEdit = { editVideo = it.id },
-                onResume = { play(listOf(it)) },
+                onSort = ::setSort,
+                onOpen = { item ->
+                    when (item) {
+                        is ShelfItem.Single -> openVideo = item.id
+                        is ShelfItem.Series -> go(Screen.Series(item.id))
+                    }
+                },
+                onEdit = { item ->
+                    when (item) {
+                        is ShelfItem.Single -> editVideo = item.id
+                        is ShelfItem.Series -> editBox = item.id
+                    }
+                },
+                onResume = ::resume,
                 onAddDrive = { go(Screen.Drive) },
                 onAddLocal = { pickLocal.launch(arrayOf("video/*")) },
                 onPlaylists = { go(Screen.Playlists) },
                 onSettings = { go(Screen.Settings) },
                 updateAvailable = newerAvailable,
-            )
-            Screen.Drive -> DrivePickerScreen(
-                onBack = ::back,
-                onAdded = { n ->
-                    toast(if (n == 1) "1 DVD na estante" else if (n == 0) "Esses vídeos já estavam na estante" else "$n DVDs na estante")
-                    back()
+                onMove = { id, shelf, before ->
+                    // Arrastar fixa a ordem atual como "minha ordem" e passa a usar ela.
+                    if (sort != SortOrder.MANUAL) { library.freezeOrder(sort); setSort(SortOrder.MANUAL) }
+                    library.move(id, shelf, before)
                 },
+                theme = ShelfThemes.current,
             )
+            Screen.Drive -> DrivePickerScreen(onBack = ::back, onAdded = { n -> toast(addedMsg(n)); back() })
             Screen.Playlists -> PlaylistsScreen(
-                state = state,
-                library = library,
-                onBack = ::back,
+                state = state, library = library, onBack = ::back,
                 onOpen = { go(Screen.PlaylistDetail(it.id)) },
                 onPlay = { p -> play(state.videosOf(p)) },
             )
             is Screen.PlaylistDetail -> {
                 val p = state.playlist(s.id)
                 if (p == null) LaunchedEffect(Unit) { back() }
-                else PlaylistDetailScreen(
-                    playlist = p,
-                    state = state,
-                    library = library,
-                    onBack = ::back,
-                    onPlayFrom = { i -> play(state.videosOf(p), i) },
+                else PlaylistDetailScreen(p, state, library, onBack = ::back, onPlayFrom = { i -> play(state.videosOf(p), i) })
+            }
+            is Screen.Series -> {
+                val box = state.box(s.id)
+                if (box == null) LaunchedEffect(Unit) { back() }
+                else BoxScreen(
+                    box, state, onBack = ::back,
+                    onPlay = { queue, i, fromStart -> play(queue, i, fromStart) },
+                    onEditEpisode = { editVideo = it.id },
                 )
             }
-            Screen.Settings -> SettingsScreen(
-                onBack = ::back,
-                onCheckUpdate = { showUpdate = true },
-                updateAvailable = newerAvailable,
-            )
+            Screen.Settings -> SettingsScreen(onBack = ::back, onCheckUpdate = { showUpdate = true }, updateAvailable = newerAvailable)
             is Screen.Player -> {
                 val queue = s.queue.mapNotNull { library.current.video(it) }
                 if (queue.isEmpty()) LaunchedEffect(Unit) { back() }
@@ -195,6 +260,10 @@ fun EstanteApp() {
     editVideo?.let { id ->
         state.video(id)?.let { v -> EditVideoDialog(v, state.shelves, onDismiss = { editVideo = null }) } ?: LaunchedEffect(id) { editVideo = null }
     }
+    editBox?.let { id ->
+        state.box(id)?.let { b -> BoxEditDialog(b, state.episodesOf(id), state.shelves, onDismiss = { editBox = null }, onDeleted = { editBox = null }) }
+            ?: LaunchedEffect(id) { editBox = null }
+    }
     listVideo?.let { id ->
         state.video(id)?.let { v -> AddToPlaylistDialog(v, state.playlists, onDismiss = { listVideo = null }) } ?: LaunchedEffect(id) { listVideo = null }
     }
@@ -202,10 +271,11 @@ fun EstanteApp() {
         ShelfChoiceDialog(
             count = uris.size,
             shelves = state.shelves,
-            onConfirm = { shelf ->
-                val n = Importer.addLocal(context, uris, shelf)
+            allowSeries = true,
+            onConfirm = { shelf, series, _ ->
+                val n = Importer.addLocal(context, uris, shelf, series)
                 localPicked = null
-                toast(if (n == 1) "1 DVD na estante" else if (n == 0) "Esses vídeos já estavam na estante" else "$n DVDs na estante")
+                toast(addedMsg(n))
             },
             onDismiss = { localPicked = null },
         )

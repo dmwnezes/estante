@@ -24,12 +24,18 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
-            android:supportsPictureInPicture="false">
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Enviar para a TV (Google Cast, receptor padrão) -->
+        <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="com.dmwnezes.estante.player.CastOptionsProvider" />
 
         <!-- Entrega o APK baixado ao instalador do Android -->
         <provider
