@@ -67,13 +67,14 @@
   .person div:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .waiting { color: var(--muted); font-size: 13px; padding-top: 6px; }
   /* Teclado aberto: a faixa de quem está na sala vira uma linha só. */
-  .mini { display: none; align-items: center; gap: 10px; margin: 6px 12px; padding: 6px 12px; border-radius: 999px; background: var(--card); flex: none; }
+  /* Quem está na sala: uma linha só */
+  .mini { display: flex; align-items: center; gap: 10px; margin: 8px 12px; padding: 6px 12px 6px 8px; border-radius: 999px; background: var(--card); flex: none; }
   .mini .dots { display: flex; }
-  .mini .dots span { width: 24px; height: 24px; border-radius: 50%; margin-right: -8px; border: 2px solid var(--card); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #1A1438; }
-  .mini .names { flex: 1; min-width: 0; margin-left: 8px; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .mini .c { color: var(--accent); font-size: 12px; font-weight: 600; }
-  body.kb .card { display: none; }
-  body.kb .mini { display: flex; }
+  .mini .dots span { position: relative; width: 32px; height: 32px; border-radius: 50%; margin-right: -9px; border: 2px solid var(--card); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; color: #1A1438; }
+  .mini .dots span i { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); font-size: 10px; font-style: normal; }
+  .mini .names { flex: 1; min-width: 0; margin-left: 8px; display: flex; flex-direction: column; }
+  .mini .names b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mini .names > span { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   body.kb form { padding-bottom: 8px; }
 
   #chat { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 14px; display: flex; flex-direction: column; gap: 6px; -webkit-overflow-scrolling: touch; }
@@ -152,14 +153,12 @@
     <div id="floats"></div>
   </div>
   <div class="side">
-    <div class="card">
-      <div class="row">
-        <div class="title"><b id="movie"></b><span id="code"></span></div>
-        <div class="sync" id="sync">conectando…</div>
-      </div>
-      <div class="people" id="people"></div>
+    <div class="mini" id="mini">
+      <div class="dots" id="miniDots"></div>
+      <div class="names"><b id="miniNames"></b><span><span id="code"></span> · <span id="movie"></span></span></div>
+      <div class="sync" id="sync">conectando…</div>
     </div>
-    <div class="mini" id="mini"><div class="dots" id="miniDots"></div><div class="names" id="miniNames"></div><div class="c" id="miniCode"></div></div>
+    <div id="people" hidden></div>
     <div id="chat"><div class="empty">O chat da sala aparece aqui.</div></div>
     <div id="typing"><div class="dots"><i></i><i></i><i></i></div><span id="typingText"></span></div>
     <div class="reacts" id="reacts"></div>
@@ -304,8 +303,8 @@
         </div>
         <div>${esc(x.name || "?")}${x.id === me ? " (você)" : ""}</div>
       </div>`).join("") + (list.length <= 1 ? '<div class="waiting">Esperando o pessoal…</div>' : "");
-    $("miniDots").innerHTML = list.slice(0, 5).map((x) => `<span style="background:${colorOf(x.name || "?")}">${esc((x.name || "?").trim().charAt(0).toUpperCase())}</span>`).join("");
-    $("miniNames").textContent = list.map((x) => (x.id === me ? "você" : x.name)).join(", ");
+    $("miniDots").innerHTML = list.slice(0, 5).map((x) => `<span style="background:${colorOf(x.name || "?")}">${x.id === host ? "<i>👑</i>" : ""}${esc((x.name || "?").trim().charAt(0).toUpperCase())}</span>`).join("");
+    $("miniNames").textContent = list.length <= 1 ? "Esperando o pessoal…" : list.map((x) => (x.id === me ? "você" : x.name)).join(", ");
     renderChat();
   }
   // Só fotos de verdade (nada de link escondido na mensagem).
@@ -520,7 +519,6 @@
     $("join").style.display = "none";
     room.style.display = "flex";
     room.classList.add("on");
-    $("miniCode").textContent = code;
     fit();
     joined = true;
     Object.keys((tree && tree.reactions) || {}).forEach((id) => seenReactions.add(id));

@@ -403,58 +403,41 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
         }
         if (full) return@Column
 
-        // Quem está na sala (com o teclado aberto vira uma linha só, para sobrar espaço para o chat)
+        // Quem está na sala: uma linha só (bolinhas, filme/código e convidar)
         val online = people.filter { PartySync.online(it, now) }
-        if (imeVisible) {
-            Row(
-                Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth().clip(Shapes.pill).background(Cinema.surface)
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy((-8).dp)) {
-                    online.take(5).forEach { p ->
-                        Box(
-                            Modifier.size(24.dp).clip(CircleShape).background(Cinema.surface).padding(1.5.dp).clip(CircleShape).background(personColor(p.name)),
-                            contentAlignment = Alignment.Center,
-                        ) { Text(p.name.trim().take(1).uppercase(), color = Cinema.onAccent, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold) }
-                    }
-                }
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    online.joinToString(", ") { if (it.id == session.me) "você" else it.name },
-                    color = Cinema.muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
-                )
-                Text("Sala ${session.code}", color = Cinema.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            }
-        } else Column(
-            Modifier.padding(12.dp).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Cinema.surface).padding(14.dp),
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 8.dp).fillMaxWidth().clip(Shapes.pill).background(Cinema.surface)
+                .padding(start = 8.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(video.title, color = Cinema.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("Sala ${session.code}", color = Cinema.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                }
-                Row(
-                    Modifier.clip(Shapes.pill).background(Cinema.accent).clickable(onClick = ::share).padding(horizontal = 14.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Rounded.Share, null, tint = Cinema.onAccent, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Convidar", color = Cinema.onAccent, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                items(online, key = { it.id }) { p -> Avatar(p, isHost = p.id == host, isMe = p.id == session.me) }
-                if (online.size <= 1) item {
-                    Column(Modifier.padding(top = 6.dp)) {
-                        Text("Esperando alguém entrar…", color = Cinema.muted, fontSize = 13.sp)
-                        Text("Toque em Convidar e mande o link.", color = Cinema.muted.copy(alpha = 0.7f), fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy((-9).dp)) {
+                online.take(5).forEach { p ->
+                    Box {
+                        Box(
+                            Modifier.size(32.dp).clip(CircleShape).background(Cinema.surface).padding(2.dp).clip(CircleShape).background(personColor(p.name)),
+                            contentAlignment = Alignment.Center,
+                        ) { Text(p.name.trim().take(1).uppercase().ifBlank { "?" }, color = Cinema.onAccent, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold) }
+                        if (p.id == host) Text("👑", fontSize = 10.sp, modifier = Modifier.align(Alignment.TopCenter).offset(y = (-8).dp))
                     }
                 }
             }
-            error?.let { Text(it, color = Cinema.red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)) }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (online.size <= 1) "Esperando alguém entrar…" else online.joinToString(", ") { if (it.id == session.me) "você" else it.name },
+                    color = Cinema.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "Sala ${session.code} · ${video.title}", color = Cinema.muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(6.dp))
+            IconButton(
+                onClick = ::share,
+                modifier = Modifier.size(38.dp).clip(CircleShape).background(Cinema.accent),
+            ) { Icon(Icons.Rounded.Share, "Convidar", tint = Cinema.onAccent, modifier = Modifier.size(18.dp)) }
         }
+        error?.let { Text(it, color = Cinema.red, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp)) }
 
         // Chat
         LazyColumn(
