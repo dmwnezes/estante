@@ -58,7 +58,7 @@ Você abre a sala no app; a outra pessoa entra pelo site **https://dmwnezes.gith
 2. Toque na chave criada para restringir: em **Restrições de aplicativos** escolha **Referenciadores HTTP** e adicione `dmwnezes.github.io/*`; em **Restrições de API** escolha só a **Google Drive API**. Salve e copie a chave (começa com `AIza`).
 
 **3. Ligar o site no GitHub**
-No repositório: **Settings > Pages > Build and deployment > Deploy from a branch**, branch **main**, pasta **/docs**, **Save**. Em um ou dois minutos o site fica no ar.
+No repositório: **Settings > Pages > Build and deployment > Deploy from a branch**, branch **main**, pasta **/ (root)**, **Save**. Em um ou dois minutos o site fica no ar.
 
 **4. Compartilhar os filmes**
 No Drive, compartilhe a pasta dos filmes como **Qualquer pessoa com o link · Leitor** (assim vale para todos de uma vez). Sem isso o iPhone não tem permissão de ler o arquivo. O app avisa se o filme ainda não estiver compartilhado.
@@ -98,6 +98,6 @@ app/src/main/java/com/dmwnezes/estante/
 └── ui/                    estante, DVD, tábua, listas, Drive, ajustes e abertura
 ```
 
-O site da sala fica em `docs/sala/index.html` (GitHub Pages).
+O site da sala fica em `sala/index.html` (GitHub Pages, publicado da raiz).
 
 Cada `push` na branch `main` roda os testes, compila o APK no GitHub Actions e publica em **Releases**.
