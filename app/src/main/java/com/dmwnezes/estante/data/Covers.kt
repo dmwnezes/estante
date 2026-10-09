@@ -37,15 +37,7 @@ class Covers(context: Context, private val http: OkHttpClient) {
 
     /** Imagem escolhida na galeria. */
     suspend fun fromImage(uri: Uri): String? = withContext(Dispatchers.IO) {
-        runCatching {
-            val src = ImageDecoder.createSource(app.contentResolver, uri)
-            val bmp = ImageDecoder.decodeBitmap(src) { d, info, _ ->
-                d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                val h = info.size.height
-                if (h > MAX) d.setTargetSize(info.size.width * MAX / h, MAX)
-            }
-            save(bmp)
-        }.getOrNull()
+        ImageLoad.decode(app, uri, MAX)?.let { runCatching { save(it) }.getOrNull() }
     }
 
     /** Miniatura que o Google Drive gera para o vídeo (pedida em tamanho maior). */

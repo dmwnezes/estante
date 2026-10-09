@@ -40,7 +40,7 @@ object Subtitles {
         } catch (e: CharacterCodingException) {
             String(bytes, Charset.forName("windows-1252"))
         }
-        return text.removePrefix("﻿")
+        return text.removePrefix("\uFEFF")
     }
 
     /** SRT → WebVTT (o Chromecast só entende WebVTT). */

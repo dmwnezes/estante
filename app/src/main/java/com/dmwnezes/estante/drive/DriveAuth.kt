@@ -133,8 +133,13 @@ class DriveAuth(context: Context) {
 
     /** Impressão digital SHA-1 da chave do app, no formato que o Google Cloud pede. */
     fun signingSha1(): String = runCatching {
-        val info = app.packageManager.getPackageInfo(app.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
-        val cert = info.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray() ?: return@runCatching "?"
+        val cert = if (android.os.Build.VERSION.SDK_INT >= 28) {
+            app.packageManager.getPackageInfo(app.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+                .signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
+        } else {
+            @Suppress("DEPRECATION")
+            app.packageManager.getPackageInfo(app.packageName, PackageManager.GET_SIGNATURES).signatures?.firstOrNull()?.toByteArray()
+        } ?: return@runCatching "?"
         MessageDigest.getInstance("SHA-1").digest(cert).joinToString(":") { "%02X".format(it) }
     }.getOrDefault("?")
 

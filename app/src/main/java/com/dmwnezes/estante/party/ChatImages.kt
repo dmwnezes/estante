@@ -83,14 +83,7 @@ object ChatImages {
     /** Reduz a foto escolhida e devolve pronta para mandar (ou nulo se não deu para abrir). */
     suspend fun prepare(context: Context, uri: Uri): String? = withContext(Dispatchers.IO) {
         runCatching {
-            val src = ImageDecoder.createSource(context.contentResolver, uri)
-            val bmp = ImageDecoder.decodeBitmap(src) { d, info, _ ->
-                d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                val w = info.size.width
-                val h = info.size.height
-                val scale = MAX_SIDE.toFloat() / maxOf(w, h)
-                if (scale < 1f) d.setTargetSize((w * scale).toInt().coerceAtLeast(1), (h * scale).toInt().coerceAtLeast(1))
-            }
+            val bmp = com.dmwnezes.estante.data.ImageLoad.decode(context, uri, MAX_SIDE) ?: return@runCatching null
             // Fundo branco para PNG com transparência (JPEG não tem transparência).
             val flat = if (bmp.hasAlpha()) {
                 Bitmap.createBitmap(bmp.width, bmp.height, Bitmap.Config.ARGB_8888).also {

@@ -17,6 +17,7 @@
     --text: #F4F1FF; --muted: #A9A2D0; --accent: #9B8CFF; --on-accent: #1A1438; --red: #E5737A; --green: #5FB873; --yellow: #E6C14F;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { overflow: hidden; }
   html, body { margin: 0; height: 100%; background: linear-gradient(#2A2058, #120E2B) fixed, var(--bg); color: var(--text); font-family: Outfit, system-ui, -apple-system, sans-serif; overscroll-behavior: none; }
   body { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
   /* A sala ocupa só a parte visível da tela: com o teclado aberto ela encolhe (o player fica no lugar). */
@@ -27,9 +28,9 @@
      chat no meio e a caixa de texto colada no teclado. */
   body.kb .player { aspect-ratio: auto; height: min(56.25vw, calc(var(--vv-h, 100dvh) * 0.34)); padding-top: 0; }
   body.kb .mini { display: none; }
-  #pdots { position: absolute; left: 10px; bottom: 10px; display: none; z-index: 2; pointer-events: none; }
+  #pdots { position: absolute; left: 10px; top: 10px; display: none; z-index: 2; pointer-events: none; }
   #pdots span { position: relative; width: 30px; height: 30px; border-radius: 50%; margin-right: -8px; border: 2px solid rgba(0,0,0,.6); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; color: #1A1438; }
-  #pdots span i { position: absolute; top: -11px; left: 50%; transform: translateX(-50%); font-size: 10px; font-style: normal; }
+  #pdots span i { position: absolute; top: -9px; left: 50%; transform: translateX(-50%); font-size: 10px; font-style: normal; }
   body.kb #pdots { display: flex; }
   body.kb #chat { padding-top: 8px; }
   button { font-family: inherit; }
@@ -58,7 +59,9 @@
   #room { display: none; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
   .player { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; flex: none; padding-top: env(safe-area-inset-top); box-sizing: content-box; }
   video { width: 100%; height: 100%; display: block; background: #000; }
-  .overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 20px; background: rgba(0,0,0,.75); color: #fff; font-size: 15px; line-height: 1.4; }
+  .overlay { position: absolute; inset: 0; z-index: 4; display: none; align-items: center; justify-content: center; text-align: center; padding: 16px; background: rgba(10,7,30,.82); color: #fff; font-size: 15px; line-height: 1.4; }
+  .overlay p { margin: 0 0 12px; }
+  .overlay .btn { padding: 11px 22px; font-size: 15px; }
   .overlay.show { display: flex; }
   .card { margin: 12px; padding: 14px; border-radius: 24px; background: var(--card); flex: none; }
   .row { display: flex; align-items: center; gap: 10px; }
@@ -136,12 +139,11 @@
   #viewer button { position: absolute; top: calc(10px + env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px; border-radius: 50%; border: 0; background: rgba(255,255,255,.15); color: #fff; font-size: 22px; }
   #viewer p { position: absolute; bottom: calc(14px + env(safe-area-inset-bottom)); left: 0; right: 0; text-align: center; color: rgba(255,255,255,.6); font-size: 12px; margin: 0; }
 
-  @media (orientation: landscape) and (max-height: 500px) {
-    body { flex-direction: row; }
-    #room { flex-direction: row; }
-    .player { width: 62%; height: 100dvh; aspect-ratio: auto; padding-top: 0; }
-    .side { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  }
+  /* Celular deitado de verdade (pela orientação da tela, não pela área visível — com o teclado
+     aberto a área fica "larga" e isso não pode virar layout deitado). */
+  body.land:not(.kb) #room { flex-direction: row; }
+  body.land:not(.kb) .player { width: 62%; height: var(--vv-h, 100dvh); aspect-ratio: auto; padding-top: 0; }
+  body.land:not(.kb) .side { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .side { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 </style>
 </head>
@@ -176,7 +178,7 @@
     <div class="reacts" id="reacts"></div>
     <form id="form" autocomplete="off">
       <label class="pic" id="pic" aria-label="Mandar foto"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 5H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Zm0 12H5l3.5-4.5 2.5 3 3.5-4.5L19 17ZM8.5 10A1.5 1.5 0 1 0 8.5 7a1.5 1.5 0 0 0 0 3Z"/></svg><input type="file" id="file" accept="image/*"></label>
-      <input type="text" id="text" placeholder="Mensagem para a sala" maxlength="500" enterkeyhint="send">
+      <input type="text" id="text" placeholder="Mensagem para a sala" maxlength="500" enterkeyhint="send" autocomplete="off" autocapitalize="sentences" dir="ltr">
       <button id="send" aria-label="Enviar"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12 2-12 2z"/></svg></button>
     </form>
   </div>
@@ -229,45 +231,91 @@
   const serverNow = () => Date.now() + offset;
 
   // ---------- Player ----------
+  // Comandos que chegam da sala mexem no vídeo; esses eventos NÃO podem voltar para a sala
+  // (senão vira eco). Cada mexida nossa liga uma marca que o próximo evento daquele tipo consome.
   const video = $("video");
-  let joined = false, suppressUntil = 0, lastState = null, lastRemoteKey = "";
+  let joined = false, lastState = null, lastRemoteKey = "", pendingSeek = null, unlocked = false;
+  const ignore = { play: 0, pause: 0, seek: 0 };
+  const mark = (k) => { ignore[k] = Date.now() + 4000; };
+  const consume = (k) => { if (ignore[k] > Date.now()) { ignore[k] = 0; return true; } return false; };
   const expected = (s) => s.position + (s.playing ? Math.max(0, serverNow() - s.at) / 1000 : 0);
 
   function sendState(playing) {
     const s = { playing, position: video.currentTime, at: serverNow(), by: me, seq: Date.now() };
     lastState = s;
-    api("PUT", "/state", s).catch(showConn);
+    api("PUT", "/state", s).catch(() => showConn(false));
   }
+  /** Pula para [t] segundos — ou guarda para quando o vídeo tiver carregado o começo. */
+  function seekTo(t, tolerance = 1) {
+    if (!isFinite(t) || t < 0) return;
+    if (video.readyState < 1) { pendingSeek = t; return; }
+    if (Math.abs(video.currentTime - t) <= tolerance) return;
+    mark("seek");
+    video.currentTime = t;
+  }
+  function doPlay() {
+    if (!video.paused) return Promise.resolve();
+    mark("play");
+    return video.play().then(() => { unlocked = true; hideOverlay(); }).catch((err) => {
+      ignore.play = 0;
+      if (err && err.name === "NotAllowedError") askTap();
+      else if (video.error) showVideoError();
+    });
+  }
+  function doPause() { if (!video.paused) { mark("pause"); video.pause(); } }
   function applyRemote(s) {
     lastState = s;
-    suppressUntil = Date.now() + 900;
-    const exp = expected(s);
-    if (Math.abs(video.currentTime - exp) > 1 && isFinite(exp)) video.currentTime = exp;
-    if (s.playing && video.paused) video.play().catch(() => askTap());
-    if (!s.playing && !video.paused) video.pause();
+    seekTo(expected(s));
+    if (s.playing) doPlay(); else doPause();
   }
-  const fromMe = () => Date.now() > suppressUntil;
-  video.addEventListener("play", () => { if (fromMe()) sendState(true); });
-  video.addEventListener("pause", () => { if (fromMe() && !video.seeking) sendState(false); });
-  video.addEventListener("seeked", () => { if (fromMe()) sendState(!video.paused); });
-  video.addEventListener("error", () => overlay("Não consegui abrir o vídeo. Peça para conferir se o filme está compartilhado por link e se é MP4."));
+  video.addEventListener("loadedmetadata", () => {
+    if (pendingSeek == null) return;
+    pendingSeek = null;
+    if (lastState) seekTo(expected(lastState), 0.3);
+  });
+  video.addEventListener("play", () => { if (!consume("play") && joined) sendState(true); });
+  video.addEventListener("pause", () => { if (!consume("pause") && joined && !video.seeking && !video.ended) sendState(false); });
+  video.addEventListener("seeked", () => { if (!consume("seek") && joined) sendState(!video.paused); });
+  video.addEventListener("error", showVideoError);
 
-  function overlay(text, onTap) {
+  function hideOverlay() { $("overlay").classList.remove("show"); }
+  function overlay(html, button, onTap) {
     const o = $("overlay");
-    o.textContent = text; o.classList.add("show");
-    o.onclick = () => { o.classList.remove("show"); onTap && onTap(); };
+    o.innerHTML = `<div><p>${html}</p>${button ? `<button type="button" class="btn">${button}</button>` : ""}</div>`;
+    o.classList.add("show");
+    const b = o.querySelector("button");
+    if (b) b.addEventListener("click", (e) => { e.stopPropagation(); onTap && onTap(); });
   }
+  /** Navegador bloqueou o play automático: um toque resolve (é um gesto do usuário). */
   function askTap() {
-    overlay("Toque aqui para acompanhar a sala", () => { if (lastState) applyRemote(lastState); });
+    overlay("Toque para entrar no filme junto com a sala", "▶ Assistir junto", () => {
+      hideOverlay();
+      mark("play");
+      video.play().then(() => {
+        unlocked = true;
+        if (lastState) { seekTo(expected(lastState)); if (!lastState.playing) doPause(); }
+      }).catch(() => { ignore.play = 0; if (video.error) showVideoError(); else askTap(); });
+    });
+  }
+  function showVideoError() {
+    const code = video.error ? video.error.code : 0;
+    const msg = code === 4
+      ? "Este navegador não conseguiu abrir o filme. Ele precisa estar compartilhado no Drive como “qualquer pessoa com o link” e ser MP4."
+      : code === 3 ? "O filme abriu, mas este aparelho não consegue tocar esse formato (o mais seguro é MP4)."
+      : "Não consegui baixar o filme do Drive. Confira a internet.";
+    overlay(msg, "Tentar de novo", () => {
+      hideOverlay();
+      video.load();
+      if (lastState) applyRemote(lastState);
+    });
   }
 
-  // A cada 4 s confere se escorregou mais de 1,5 s e ajusta.
+  // A cada 3 s confere se escorregou mais de 1,5 s e ajusta.
   setInterval(() => {
     renderPeople();
-    if (!joined || !lastState || !lastState.playing || video.paused) return;
-    const exp = expected(lastState);
-    if (Math.abs(video.currentTime - exp) > 1.5) { suppressUntil = Date.now() + 900; video.currentTime = exp; }
-  }, 4000);
+    if (!joined || !lastState || !lastState.playing || video.paused || video.seeking) return;
+    seekTo(expected(lastState), 1.5);
+  }, 3000);
 
   // ---------- Legenda (.srt → WebVTT, corrigindo acentos) ----------
   async function loadSubtitle(v) {
@@ -278,7 +326,7 @@
       const buf = await r.arrayBuffer();
       let text;
       try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch { text = new TextDecoder("windows-1252").decode(buf); }
-      text = text.replace(/^﻿/, "");
+      text = text.replace(/^\uFEFF/, "");
       if (!text.trimStart().startsWith("WEBVTT")) text = "WEBVTT\n\n" + text.replace(/\r\n/g, "\n").replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
       const track = document.createElement("track");
       Object.assign(track, { kind: "subtitles", label: "Legenda", srclang: "pt", default: true, src: URL.createObjectURL(new Blob([text], { type: "text/vtt" })) });
@@ -490,45 +538,62 @@
     } catch (_) { showConn(false); }
   }
 
-  // ---------- Teclado (iPhone) ----------
-  // O Safari não encolhe a página quando o teclado abre: ele rola tudo para cima. Aqui a sala
-  // acompanha a área visível, então o player continua no topo e a caixa de texto fica no teclado.
+  // ---------- Teclado ----------
+  // Celular (qualquer navegador): com a caixa de texto em foco, o layout vira o da referência —
+  // player menor no topo, bolinhas por cima do vídeo, chat no meio e a caixa colada no teclado.
+  // A sala acompanha só a área visível da tela; nada é mexido enquanto você digita.
   const vv = window.visualViewport;
   const room = $("room");
-  let fullH = 0, lastW = 0;
+  const touch = matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
+  let lastH = -1, lastTop = -1, raf = 0;
   function fit() {
-    if (document.body.classList.contains("in-room") && (scrollX || scrollY)) scrollTo(0, 0);
-    const h = vv ? vv.height : innerHeight;
-    // Altura "sem teclado": a maior já vista (zera se girar o celular).
-    if (innerWidth !== lastW) { lastW = innerWidth; fullH = 0; }
-    fullH = Math.max(fullH, h);
-    const top = vv ? vv.offsetTop : 0;
-    document.documentElement.style.setProperty("--vv-h", h + "px");
-    document.documentElement.style.setProperty("--vv-top", top + "px");
-    const kb = h < fullH * 0.78 && document.activeElement === textInput;
-    if (kb !== document.body.classList.contains("kb")) {
-      document.body.classList.toggle("kb", kb);
-      requestAnimationFrame(() => { $("chat").scrollTop = $("chat").scrollHeight; });
-    }
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      const h = Math.round(vv ? vv.height : innerHeight);
+      const top = Math.round(vv ? Math.max(0, vv.offsetTop) : 0);
+      if (Math.abs(h - lastH) > 1) { lastH = h; document.documentElement.style.setProperty("--vv-h", h + "px"); }
+      if (Math.abs(top - lastTop) > 1) { lastTop = top; document.documentElement.style.setProperty("--vv-top", top + "px"); }
+    });
+  }
+  /** Deitado = tela do aparelho mais larga que alta e baixinha (celular), independente do teclado. */
+  function orient() {
+    const sw = screen.width, sh = screen.height;
+    const angle = (screen.orientation && screen.orientation.angle) || (typeof window.orientation === "number" ? window.orientation : 0);
+    const landscape = Math.abs(angle) === 90 || (angle === 0 && sw > sh);
+    document.body.classList.toggle("land", touch && landscape);
+  }
+  orient();
+  addEventListener("orientationchange", () => setTimeout(() => { orient(); fit(); }, 200));
+  if (screen.orientation) screen.orientation.addEventListener("change", () => { orient(); fit(); });
+
+  function setKb(on) {
+    if (!touch || on === document.body.classList.contains("kb")) return;
+    document.body.classList.toggle("kb", on);
+    fit();
+    setTimeout(() => { $("chat").scrollTop = $("chat").scrollHeight; }, 60);
   }
   if (vv) { vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit); }
   addEventListener("resize", fit);
-  textInput.addEventListener("focus", () => setTimeout(fit, 50));
-  textInput.addEventListener("blur", () => setTimeout(fit, 50));
-  // Toque fora da caixa (no chat) fecha o teclado.
-  $("chat").addEventListener("touchstart", () => { if (document.activeElement === textInput) textInput.blur(); }, { passive: true });
+  textInput.addEventListener("focus", () => setKb(true));
+  // Pequena espera: ao enviar, o foco volta para a caixa e o layout não pisca.
+  textInput.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== textInput) setKb(false); }, 120));
+  // Tocar no chat ou no vídeo fecha o teclado.
+  ["chat", "video"].forEach((id) => $(id).addEventListener("touchstart", () => { if (document.activeElement === textInput) textInput.blur(); }, { passive: true }));
+  // Página nunca rola (quem rola é só o chat).
+  addEventListener("scroll", () => { if (document.body.classList.contains("in-room") && (scrollX || scrollY)) scrollTo(0, 0); }, { passive: true });
 
   // ---------- Entrar ----------
   $("name").addEventListener("input", () => { $("enter").disabled = !$("name").value.trim() || !tree || !tree.video; });
   $("name").addEventListener("keydown", (e) => { if (e.key === "Enter" && !$("enter").disabled) $("enter").click(); });
-  $("enter").addEventListener("click", async () => {
+  $("enter").addEventListener("click", () => {
     myName = $("name").value.trim().slice(0, 24);
+    if (!myName || !tree || !tree.video) return;
     localStorage.setItem("estante-nome", myName);
     const v = tree.video;
     $("movie").textContent = v.title;
     $("code").textContent = `Sala ${code}`;
     document.title = `${v.title} · Estante`;
-    video.src = `https://www.googleapis.com/drive/v3/files/${v.fileId}?alt=media&supportsAllDrives=true&key=${v.key}`;
     $("join").style.display = "none";
     room.style.display = "flex";
     room.classList.add("on");
@@ -536,16 +601,30 @@
     fit();
     joined = true;
     Object.keys((tree && tree.reactions) || {}).forEach((id) => seenReactions.add(id));
-    await heartbeat();
+    video.src = `https://www.googleapis.com/drive/v3/files/${v.fileId}?alt=media&supportsAllDrives=true&key=${v.key}`;
+    // Ainda dentro do toque em "Entrar": dá play já (o navegador libera som e play automático
+    // para o resto da sessão). Se a sala estiver pausada, pausa assim que começar.
+    const s0 = tree.state;
+    lastState = s0 || null;
+    if (s0) seekTo(expected(s0));
+    mark("play");
+    video.play().then(() => {
+      unlocked = true;
+      if (lastState && !lastState.playing) doPause();
+      else if (lastState) seekTo(expected(lastState));
+    }).catch((err) => {
+      ignore.play = 0;
+      if (lastState && lastState.playing) { if (err && err.name === "NotAllowedError") askTap(); else if (video.error) showVideoError(); }
+    });
+    heartbeat();
     setInterval(heartbeat, 10000);
     loadSubtitle(v);
-    // Toque no botão Entrar conta como gesto: deixa o Safari tocar com som.
-    if (tree.state) applyRemote(tree.state);
     renderPeople();
   });
 
   addEventListener("pagehide", () => { if (joined) { api("DELETE", `/people/${me}`).catch(() => {}); api("DELETE", `/typing/${me}`).catch(() => {}); } });
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && joined) { heartbeat(); if (lastState) applyRemote(lastState); } });
+  // Voltou para a aba: se reconecta e alcança a sala (sem reenviar nada).
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && joined) { heartbeat(); if (lastState && lastState.by !== me) applyRemote(lastState); } });
 })();
 </script>
 </body>

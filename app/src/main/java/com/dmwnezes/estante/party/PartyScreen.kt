@@ -221,7 +221,8 @@ private fun Info(title: String, text: String, actions: @Composable () -> Unit) {
 /** Mensagem de sistema ("Fulana entrou") só na tela, não vai para o banco. */
 private data class Line(val key: String, val at: Long, val msg: ChatMessage?, val system: String?)
 
-@OptIn(UnstableApi::class, ExperimentalLayoutApi::class)
+@androidx.annotation.OptIn(UnstableApi::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
     val context = LocalContext.current
