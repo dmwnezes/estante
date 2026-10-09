@@ -29,6 +29,20 @@ class DriveAndUpdateTest {
         assertEquals("https://x/=s220", items[1].thumbnail)
     }
 
+    @Test fun `entende o 403 do google`() {
+        val disabled = com.dmwnezes.estante.drive.DriveApiException.from(403,
+            """{"error":{"code":403,"message":"Google Drive API has not been used in project 123 before or it is disabled.","errors":[{"reason":"accessNotConfigured"}],"details":[{"reason":"SERVICE_DISABLED"}]}}""")
+        assertTrue(disabled.friendly.startsWith("A Google Drive API não está ativada"))
+        assertTrue(!disabled.needsReconnect)
+
+        val scope = com.dmwnezes.estante.drive.DriveApiException.from(403,
+            """{"error":{"code":403,"message":"Request had insufficient authentication scopes.","errors":[{"reason":"insufficientPermissions"}],"details":[{"reason":"ACCESS_TOKEN_SCOPE_INSUFFICIENT"}]}}""")
+        assertTrue(scope.needsReconnect)
+        assertTrue(scope.friendly.contains("marque a caixa"))
+
+        assertTrue(com.dmwnezes.estante.drive.DriveApiException.from(500, "nada").friendly.contains("500"))
+    }
+
     @Test fun `endereco do streaming`() {
         assertEquals("https://www.googleapis.com/drive/v3/files/XYZ?alt=media&supportsAllDrives=true", DriveClient.streamUrl("XYZ"))
     }

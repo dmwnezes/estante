@@ -74,6 +74,45 @@ class DriveTokenInterceptor(private val auth: DriveAuth) : Interceptor {
     }
 }
 
+/** Erro devolvido pela API do Drive, com o motivo que o Google informou. */
+class DriveApiException(val code: Int, val reason: String, val detail: String) : IOException("Drive respondeu $code ($reason)") {
+
+    /** O problema se resolve desconectando e entrando de novo. */
+    val needsReconnect: Boolean get() = code == 401 || reason in SCOPE_REASONS
+
+    /** Explicação em português do que fazer. */
+    val friendly: String
+        get() = when {
+            reason in DISABLED_REASONS || detail.contains("has not been used in project", true) || detail.contains("is disabled", true) ->
+                "A Google Drive API não está ativada no projeto do Google Cloud. Ative em APIs e serviços > Biblioteca > Google Drive API. " +
+                    "Se acabou de ativar, espere uns 5 minutos e tente de novo."
+            reason in SCOPE_REASONS ->
+                "O Google não deu a permissão de ver os arquivos do Drive. Toque em Conectar de novo e, na tela do Google, marque a caixa do Google Drive."
+            code == 401 -> "O login do Google venceu. Toque em Conectar de novo."
+            reason == "rateLimitExceeded" || reason == "userRateLimitExceeded" || code == 429 ->
+                "O Google pediu uma pausa (muitas consultas seguidas). Espere um minuto e tente de novo."
+            code == 404 -> "Não encontrei essa pasta ou arquivo no Drive."
+            else -> "O Drive recusou o pedido ($code${if (reason.isNotBlank()) ", $reason" else ""}). ${detail.take(160)}".trim()
+        }
+
+    companion object {
+        private val DISABLED_REASONS = setOf("accessNotConfigured", "SERVICE_DISABLED")
+        private val SCOPE_REASONS = setOf("insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT", "insufficientScopes")
+
+        /** Lê o corpo de erro do Google: {"error":{"message":...,"errors":[{"reason":...}],"details":[{"reason":...}]}} */
+        fun from(code: Int, body: String): DriveApiException {
+            val err = runCatching { JSONObject(body).optJSONObject("error") }.getOrNull()
+            val message = err?.optString("message").orEmpty()
+            val reasons = buildList {
+                err?.optJSONArray("errors")?.let { a -> for (i in 0 until a.length()) add(a.getJSONObject(i).optString("reason")) }
+                err?.optJSONArray("details")?.let { a -> for (i in 0 until a.length()) add(a.getJSONObject(i).optString("reason")) }
+            }.filter { it.isNotBlank() }
+            val reason = reasons.firstOrNull { it in DISABLED_REASONS || it in SCOPE_REASONS } ?: reasons.firstOrNull().orEmpty()
+            return DriveApiException(code, reason, message)
+        }
+    }
+}
+
 class DriveClient(private val http: OkHttpClient) {
 
     companion object {
@@ -84,7 +123,7 @@ class DriveClient(private val http: OkHttpClient) {
     private suspend fun get(url: okhttp3.HttpUrl): JSONObject = withContext(Dispatchers.IO) {
         http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
             val body = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw IOException("Drive respondeu ${resp.code}")
+            if (!resp.isSuccessful) throw DriveApiException.from(resp.code, body)
             JSONObject(body)
         }
     }

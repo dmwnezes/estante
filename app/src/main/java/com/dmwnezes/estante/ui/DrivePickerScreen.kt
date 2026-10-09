@@ -156,6 +156,7 @@ private fun DriveBrowser(onBack: () -> Unit, onAdded: (Int) -> Unit) {
     var items by remember { mutableStateOf<List<DriveItem>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var needsReconnect by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var reload by remember { mutableStateOf(0) }
     val selected = remember { mutableStateMapOf<String, DriveItem>() }
@@ -173,7 +174,11 @@ private fun DriveBrowser(onBack: () -> Unit, onAdded: (Int) -> Unit) {
                 DriveTab.SEARCH -> AppGraph.drive.search(query)
             }
         }.onSuccess { items = it }
-            .onFailure { error = "Não consegui abrir o Drive. ${it.message ?: ""}".trim() }
+            .onFailure {
+                val api = it as? com.dmwnezes.estante.drive.DriveApiException
+                needsReconnect = api?.needsReconnect == true || it.message?.contains("desconectado") == true
+                error = api?.friendly ?: "Não consegui abrir o Drive. ${it.message ?: ""}".trim()
+            }
         loading = false
     }
 
@@ -211,7 +216,11 @@ private fun DriveBrowser(onBack: () -> Unit, onAdded: (Int) -> Unit) {
                 loading -> CircularProgressIndicator(Modifier.align(Alignment.Center), color = Cinema.accent)
                 error != null -> Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(error!!, color = Cinema.muted, textAlign = TextAlign.Center)
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(14.dp))
+                    if (needsReconnect) {
+                        PillButton("Conectar de novo", Icons.Rounded.AddToDrive, { AppGraph.auth.disconnect() })
+                        Spacer(Modifier.height(10.dp))
+                    }
                     PillButton("Tentar de novo", null, { reload++ }, filled = false)
                 }
                 items.isEmpty() -> Text(

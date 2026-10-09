@@ -58,6 +58,7 @@ class DriveAuth(context: Context) {
     suspend fun begin(): PendingIntent? {
         val r = client.authorize(request()).await()
         if (r.hasResolution()) return r.pendingIntent
+        checkScope(r.grantedScopes)
         onToken(r.accessToken)
         return null
     }
@@ -65,8 +66,16 @@ class DriveAuth(context: Context) {
     /** Resultado da tela do Google. */
     fun finish(data: Intent?) {
         val r = client.getAuthorizationResultFromIntent(data)
+        checkScope(r.grantedScopes)
         onToken(r.accessToken)
     }
+
+    /** Na tela do Google a permissão do Drive é uma caixinha; se ficou desmarcada, avisa. */
+    private fun checkScope(granted: List<String>?) {
+        if (granted != null && granted.isNotEmpty() && SCOPE !in granted) throw MissingScopeException()
+    }
+
+    class MissingScopeException : IllegalStateException("Permissão do Drive não marcada")
 
     private fun onToken(t: String?) {
         if (t.isNullOrBlank()) error("O Google não devolveu permissão")
@@ -111,6 +120,7 @@ class DriveAuth(context: Context) {
 
     /** Mensagem amigável para os erros mais comuns do login. */
     fun explain(e: Throwable): String {
+        if (e is MissingScopeException) return "A caixa de permissão do Google Drive ficou desmarcada. Toque em Conectar de novo e marque a opção do Drive na tela do Google."
         val code = (e as? ApiException)?.statusCode
         return when (code) {
             CommonStatusCodes.DEVELOPER_ERROR ->
