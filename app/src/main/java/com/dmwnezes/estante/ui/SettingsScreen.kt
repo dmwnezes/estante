@@ -80,6 +80,8 @@ fun SettingsScreen(onBack: () -> Unit, onCheckUpdate: () -> Unit, updateAvailabl
 
             Section("Pastas sincronizadas") { SyncSettings() }
 
+            Section("Assistir junto") { PartySettings() }
+
             Section("Configurar o Google (uma vez só)") {
                 Text(
                     "Para o login funcionar, o app precisa estar registrado no Google Cloud como “Android”, com estes dois dados. Toque para copiar.",
@@ -238,4 +240,45 @@ private fun SyncSettings() {
         }
     }, enabled = !running, filled = false)
     result?.let { Text(it, color = Cinema.accent, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp)) }
+}
+
+@Composable
+private fun PartySettings() {
+    val context = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var db by remember { mutableStateOf(com.dmwnezes.estante.party.PartyConfig.dbUrl) }
+    var key by remember { mutableStateOf(com.dmwnezes.estante.party.PartyConfig.apiKey) }
+    var name by remember { mutableStateOf(com.dmwnezes.estante.party.PartyConfig.name) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var ok by remember { mutableStateOf(false) }
+    Text(
+        "Para assistir com alguém que está no iPhone (pelo site). Precisa de três coisas, uma vez só: o endereço do banco do Firebase, uma chave de API do Google e o site ligado no GitHub. O passo a passo está no README do projeto.",
+        color = Cinema.muted, fontSize = 14.sp,
+    )
+    Spacer(Modifier.height(10.dp))
+    PillButton("Abrir o passo a passo", null, {
+        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/dmwnezes/estante#assistir-junto"))) }
+    }, filled = false)
+    Spacer(Modifier.height(12.dp))
+    androidx.compose.material3.OutlinedTextField(db, { db = it }, singleLine = true, shape = Shapes.field, label = { Text("Endereço do banco (…firebaseio.com)") }, modifier = Modifier.fillMaxWidth())
+    Spacer(Modifier.height(8.dp))
+    androidx.compose.material3.OutlinedTextField(key, { key = it }, singleLine = true, shape = Shapes.field, label = { Text("Chave de API do Google (AIza…)") }, modifier = Modifier.fillMaxWidth())
+    Spacer(Modifier.height(8.dp))
+    androidx.compose.material3.OutlinedTextField(name, { name = it.take(24) }, singleLine = true, shape = Shapes.field, label = { Text("Seu nome na sala") }, modifier = Modifier.fillMaxWidth())
+    Spacer(Modifier.height(10.dp))
+    PillButton("Salvar e testar", null, {
+        val url = com.dmwnezes.estante.party.PartySync.normalizeDbUrl(db)
+        if (url == null) { ok = false; status = "O endereço deve terminar em firebaseio.com ou firebasedatabase.app."; return@PillButton }
+        com.dmwnezes.estante.party.PartyConfig.dbUrl = url
+        com.dmwnezes.estante.party.PartyConfig.apiKey = key
+        com.dmwnezes.estante.party.PartyConfig.name = name
+        db = url
+        status = "Testando…"
+        scope.launch {
+            val err = com.dmwnezes.estante.party.PartyConfig.checkDb()
+            ok = err == null
+            status = err ?: "Firebase funcionando! Abra um filme do Drive e toque em Assistir junto."
+        }
+    }, enabled = db.isNotBlank() && key.isNotBlank())
+    status?.let { Text(it, color = if (ok || it == "Testando…") Cinema.accent else Cinema.red, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp)) }
 }

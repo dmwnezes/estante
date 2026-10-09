@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#17120F">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Estante · Sala</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #17120F; --card: #241D19; --card2: #2B231E; --line: #3A302A;
+    --text: #F7EEE6; --muted: #BFAE9F; --accent: #F0A94B; --on-accent: #2A1A0E; --red: #E5737A; --green: #5FD38D;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: Outfit, system-ui, -apple-system, sans-serif; }
+  body { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+  button { font-family: inherit; }
+
+  /* Entrada */
+  #join { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; text-align: center; gap: 14px; }
+  .shelf { display: flex; gap: 8px; align-items: flex-end; height: 74px; }
+  .shelf i { display: block; width: 34px; border-radius: 5px; box-shadow: 0 6px 14px rgba(0,0,0,.5); }
+  .shelf i:nth-child(1) { height: 60px; background: linear-gradient(#C8643F, #7a3c25); }
+  .shelf i:nth-child(2) { height: 72px; background: linear-gradient(#F0A94B, #9a6a2c); }
+  .shelf i:nth-child(3) { height: 60px; background: linear-gradient(#F4E6D4, #a89a88); transform: rotate(8deg); transform-origin: bottom; }
+  .plank { width: 170px; height: 14px; border-radius: 5px; background: linear-gradient(#B07C50 0 40%, #7E522F 40%, #4A2F1B); margin-top: -2px; box-shadow: 0 8px 14px rgba(0,0,0,.45); }
+  h1 { margin: 10px 0 0; font-size: 30px; font-weight: 800; }
+  .sub { color: var(--muted); font-size: 15px; max-width: 320px; line-height: 1.4; }
+  .movie { color: var(--accent); font-weight: 600; }
+  input[type=text] {
+    width: 100%; max-width: 320px; padding: 14px 18px; border-radius: 18px; border: 1.5px solid var(--line);
+    background: var(--card); color: var(--text); font: inherit; font-size: 17px; outline: none;
+  }
+  input[type=text]:focus { border-color: var(--accent); }
+  .btn { border: 0; border-radius: 999px; padding: 14px 28px; background: var(--accent); color: var(--on-accent); font-size: 16px; font-weight: 600; cursor: pointer; }
+  .btn:disabled { opacity: .45; }
+  .err { color: var(--red); font-size: 14px; max-width: 320px; }
+
+  /* Sala */
+  #room { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  .player { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; flex: none; padding-top: env(safe-area-inset-top); box-sizing: content-box; }
+  video { width: 100%; height: 100%; display: block; background: #000; }
+  .overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 20px; background: rgba(0,0,0,.75); color: #fff; font-size: 15px; line-height: 1.4; }
+  .overlay.show { display: flex; }
+  .card { margin: 12px; padding: 14px; border-radius: 24px; background: var(--card); flex: none; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .title { flex: 1; min-width: 0; }
+  .title b { display: block; font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .title span { color: var(--accent); font-size: 13px; font-weight: 600; }
+  .sync { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .sync.ok::before { content: "●"; color: var(--green); margin-right: 5px; }
+  .sync.off::before { content: "●"; color: var(--red); margin-right: 5px; }
+  .people { display: flex; gap: 14px; overflow-x: auto; margin-top: 12px; padding-top: 10px; scrollbar-width: none; }
+  .people::-webkit-scrollbar { display: none; }
+  .person { width: 78px; flex: none; text-align: center; font-size: 11px; }
+  .av { position: relative; width: 50px; height: 50px; margin: 0 auto 4px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 20px; color: #1A1310; }
+  .av.me { box-shadow: 0 0 0 2px rgba(255,255,255,.7); }
+  .av .crown { position: absolute; top: -15px; left: 50%; transform: translateX(-50%); font-size: 15px; }
+  .av .dot { position: absolute; right: -1px; bottom: -1px; width: 14px; height: 14px; border-radius: 50%; background: var(--green); border: 2px solid var(--card); }
+  .person div:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .waiting { color: var(--muted); font-size: 13px; padding-top: 6px; }
+
+  #chat { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 14px; display: flex; flex-direction: column; gap: 6px; -webkit-overflow-scrolling: touch; }
+  .msg { display: flex; }
+  .msg.mine { justify-content: flex-end; }
+  .bubble { max-width: 78%; padding: 8px 12px; border-radius: 18px 18px 18px 4px; background: var(--card2); font-size: 15px; line-height: 1.35; word-wrap: break-word; }
+  .msg.mine .bubble { background: var(--accent); color: var(--on-accent); border-radius: 18px 18px 4px 18px; }
+  .bubble small { display: block; font-size: 12px; font-weight: 600; }
+  .sys { text-align: center; color: var(--muted); font-size: 12px; padding: 2px 0; }
+  .empty { text-align: center; color: var(--muted); opacity: .7; font-size: 13px; padding-top: 20px; }
+
+  form { display: flex; gap: 8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); flex: none; }
+  form input { flex: 1; max-width: none; border-radius: 28px; border-color: transparent; }
+  form button { width: 48px; height: 48px; flex: none; border-radius: 50%; border: 0; background: var(--line); color: var(--muted); display: flex; align-items: center; justify-content: center; }
+  form button.on { background: var(--accent); color: var(--on-accent); }
+  form svg { width: 22px; height: 22px; }
+
+  @media (orientation: landscape) and (max-height: 500px) {
+    body { flex-direction: row; }
+    #room { flex-direction: row; }
+    .player { width: 62%; height: 100dvh; aspect-ratio: auto; padding-top: 0; }
+    .side { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  }
+  .side { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+</style>
+</head>
+<body>
+
+<section id="join">
+  <div class="shelf"><i></i><i></i><i></i></div>
+  <div class="plank"></div>
+  <h1>Assistir junto</h1>
+  <p class="sub" id="joinText">Carregando a sala…</p>
+  <input type="text" id="name" placeholder="Seu nome" maxlength="24" autocomplete="nickname" enterkeyhint="go">
+  <button class="btn" id="enter" disabled>Entrar na sala</button>
+  <p class="err" id="joinErr"></p>
+</section>
+
+<section id="room">
+  <div class="player">
+    <video id="video" playsinline controls preload="metadata"></video>
+    <div class="overlay" id="overlay"></div>
+  </div>
+  <div class="side">
+    <div class="card">
+      <div class="row">
+        <div class="title"><b id="movie"></b><span id="code"></span></div>
+        <div class="sync" id="sync">conectando…</div>
+      </div>
+      <div class="people" id="people"></div>
+    </div>
+    <div id="chat"><div class="empty">O chat da sala aparece aqui.</div></div>
+    <form id="form" autocomplete="off">
+      <input type="text" id="text" placeholder="Mensagem para a sala" maxlength="500" enterkeyhint="send">
+      <button id="send" aria-label="Enviar"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12 2-12 2z"/></svg></button>
+    </form>
+  </div>
+</section>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+
+  // ---------- Sala pelo link: #CODIGO@banco.firebaseio.com ----------
+  const [code, host] = decodeURIComponent(location.hash.slice(1)).split("@");
+  if (!code || !host || !/(firebaseio\.com|firebasedatabase\.app)$/.test(host)) {
+    $("joinText").textContent = "Link incompleto. Peça o link da sala de novo.";
+    return;
+  }
+  const ROOT = `https://${host}/salas/${code}`;
+  const SV = { ".sv": "timestamp" };
+  const me = sessionStorage.getItem("estante-id") || ("w-" + Math.random().toString(36).slice(2, 10));
+  sessionStorage.setItem("estante-id", me);
+  let myName = localStorage.getItem("estante-nome") || "";
+  $("name").value = myName;
+
+  const api = (method, path, body) =>
+    fetch(`${ROOT}${path}.json`, { method, body: body === undefined ? undefined : JSON.stringify(body), keepalive: method === "DELETE" })
+      .then((r) => { if (!r.ok) throw new Error("Firebase " + r.status); return r.json(); });
+
+  // ---------- Cópia local da sala (mesma lógica do app) ----------
+  let tree = null, loaded = false;
+  const clone = (o) => (o && typeof o === "object" ? JSON.parse(JSON.stringify(o)) : o);
+  function setAt(root, path, value) {
+    const parts = path.split("/").filter(Boolean);
+    if (!parts.length) return value;
+    const top = root && typeof root === "object" ? clone(root) : {};
+    let node = top;
+    for (const p of parts.slice(0, -1)) { if (!node[p] || typeof node[p] !== "object") node[p] = {}; node = node[p]; }
+    if (value === null) delete node[parts.at(-1)]; else node[parts.at(-1)] = value;
+    return top;
+  }
+  function applyEvent(type, msg) {
+    if (type === "put") tree = setAt(tree, msg.path, msg.data);
+    else if (type === "patch") for (const k of Object.keys(msg.data || {})) tree = setAt(tree, msg.path.replace(/\/$/, "") + "/" + k, msg.data[k]);
+  }
+
+  // ---------- Relógio do servidor ----------
+  let offset = 0;
+  const serverNow = () => Date.now() + offset;
+
+  // ---------- Player ----------
+  const video = $("video");
+  let joined = false, suppressUntil = 0, lastState = null, lastRemoteKey = "";
+  const expected = (s) => s.position + (s.playing ? Math.max(0, serverNow() - s.at) / 1000 : 0);
+
+  function sendState(playing) {
+    const s = { playing, position: video.currentTime, at: serverNow(), by: me, seq: Date.now() };
+    lastState = s;
+    api("PUT", "/state", s).catch(showConn);
+  }
+  function applyRemote(s) {
+    lastState = s;
+    suppressUntil = Date.now() + 900;
+    const exp = expected(s);
+    if (Math.abs(video.currentTime - exp) > 1 && isFinite(exp)) video.currentTime = exp;
+    if (s.playing && video.paused) video.play().catch(() => askTap());
+    if (!s.playing && !video.paused) video.pause();
+  }
+  const fromMe = () => Date.now() > suppressUntil;
+  video.addEventListener("play", () => { if (fromMe()) sendState(true); });
+  video.addEventListener("pause", () => { if (fromMe() && !video.seeking) sendState(false); });
+  video.addEventListener("seeked", () => { if (fromMe()) sendState(!video.paused); });
+  video.addEventListener("error", () => overlay("Não consegui abrir o vídeo. Peça para conferir se o filme está compartilhado por link e se é MP4."));
+
+  function overlay(text, onTap) {
+    const o = $("overlay");
+    o.textContent = text; o.classList.add("show");
+    o.onclick = () => { o.classList.remove("show"); onTap && onTap(); };
+  }
+  function askTap() {
+    overlay("Toque aqui para acompanhar a sala", () => { if (lastState) applyRemote(lastState); });
+  }
+
+  // A cada 4 s confere se escorregou mais de 1,5 s e ajusta.
+  setInterval(() => {
+    renderPeople();
+    if (!joined || !lastState || !lastState.playing || video.paused) return;
+    const exp = expected(lastState);
+    if (Math.abs(video.currentTime - exp) > 1.5) { suppressUntil = Date.now() + 900; video.currentTime = exp; }
+  }, 4000);
+
+  // ---------- Legenda (.srt → WebVTT, corrigindo acentos) ----------
+  async function loadSubtitle(v) {
+    if (!v.subtitleId) return;
+    try {
+      const r = await fetch(`https://www.googleapis.com/drive/v3/files/${v.subtitleId}?alt=media&supportsAllDrives=true&key=${v.key}`);
+      if (!r.ok) return;
+      const buf = await r.arrayBuffer();
+      let text;
+      try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch { text = new TextDecoder("windows-1252").decode(buf); }
+      text = text.replace(/^﻿/, "");
+      if (!text.trimStart().startsWith("WEBVTT")) text = "WEBVTT\n\n" + text.replace(/\r\n/g, "\n").replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+      const track = document.createElement("track");
+      Object.assign(track, { kind: "subtitles", label: "Legenda", srclang: "pt", default: true, src: URL.createObjectURL(new Blob([text], { type: "text/vtt" })) });
+      video.appendChild(track);
+      track.addEventListener("load", () => { if (video.textTracks[0]) video.textTracks[0].mode = "showing"; });
+    } catch (_) {}
+  }
+
+  // ---------- Pessoas e chat ----------
+  const colors = ["#8E6BE8", "#E8836B", "#5FB8A3", "#E8C14F", "#6FA8E8", "#E56F9C"];
+  const colorOf = (name) => { let h = 0; for (const c of name.toLowerCase()) h = (h * 31 + c.charCodeAt(0)) | 0; return colors[((h % colors.length) + colors.length) % colors.length]; };
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  let known = new Set(), systemLines = [];
+
+  function online() {
+    const p = (tree && tree.people) || {};
+    return Object.entries(p).map(([id, v]) => ({ id, ...v })).filter((x) => serverNow() - (x.lastSeen || 0) < 25000)
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }
+  function renderPeople() {
+    if (!joined) return;
+    const list = online();
+    const ids = new Set(list.map((x) => x.id));
+    if (known.size) {
+      for (const x of list) if (!known.has(x.id) && x.id !== me) systemLines.push({ at: serverNow(), text: `${x.name} entrou na sala` });
+      for (const id of known) if (!ids.has(id) && id !== me) { const n = tree?.people?.[id]?.name || "Alguém"; systemLines.push({ at: serverNow(), text: `${n} saiu` }); }
+    }
+    known = ids;
+    const host = tree && tree.host;
+    $("people").innerHTML = list.map((x) => `
+      <div class="person">
+        <div class="av ${x.id === me ? "me" : ""}" style="background:${colorOf(x.name || "?")}">
+          ${x.id === host ? '<span class="crown">👑</span>' : ""}${esc((x.name || "?").trim().charAt(0).toUpperCase())}<span class="dot"></span>
+        </div>
+        <div>${esc(x.name || "?")}${x.id === me ? " (você)" : ""}</div>
+      </div>`).join("") + (list.length <= 1 ? '<div class="waiting">Esperando o pessoal…</div>' : "");
+    renderChat();
+  }
+  let lastChatHtml = "";
+  function renderChat() {
+    const c = (tree && tree.chat) || {};
+    const msgs = Object.entries(c).map(([id, m]) => ({ id, ...m })).sort((a, b) => (a.at || 0) - (b.at || 0) || a.id.localeCompare(b.id)).slice(-300);
+    const lines = [...msgs.map((m) => ({ at: m.at || 0, m })), ...systemLines.map((s) => ({ at: s.at, s }))].sort((a, b) => a.at - b.at);
+    const html = lines.length ? lines.map((l) => l.s ? `<div class="sys">${esc(l.s.text)}</div>` :
+      `<div class="msg ${l.m.by === me ? "mine" : ""}"><div class="bubble">${l.m.by === me ? "" : `<small style="color:${colorOf(l.m.name || "?")}">${esc(l.m.name || "?")}</small>`}${esc(l.m.text || "")}</div></div>`).join("")
+      : '<div class="empty">O chat da sala aparece aqui.</div>';
+    if (html === lastChatHtml) return;
+    const box = $("chat");
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    box.innerHTML = html; lastChatHtml = html;
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  }
+
+  const textInput = $("text");
+  textInput.addEventListener("input", () => $("send").classList.toggle("on", !!textInput.value.trim()));
+  $("form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const t = textInput.value.trim();
+    if (!t) return;
+    textInput.value = ""; $("send").classList.remove("on");
+    api("POST", "/chat", { name: myName, text: t.slice(0, 500), at: SV, by: me }).catch(showConn);
+    $("chat").scrollTop = $("chat").scrollHeight;
+  });
+
+  // ---------- Conexão ----------
+  function showConn(ok) {
+    const s = $("sync");
+    if (ok === true) { s.textContent = "sincronizado"; s.className = "sync ok"; }
+    else { s.textContent = "reconectando…"; s.className = "sync off"; }
+  }
+
+  function onTree() {
+    if (!loaded) return;
+    if (!tree || !tree.video) {
+      if (!joined) { $("joinText").textContent = "Sala não encontrada ou já encerrada. Peça um link novo."; $("enter").disabled = true; }
+      return;
+    }
+    if (!joined) {
+      $("joinText").innerHTML = `Você foi chamado para assistir <span class="movie">${esc(tree.video.title)}</span>. Como quer aparecer?`;
+      $("enter").disabled = !$("name").value.trim();
+      return;
+    }
+    const s = tree.state;
+    if (s && s.by !== me) {
+      const key = `${s.by}:${s.seq}:${s.at}`;
+      if (key !== lastRemoteKey) { lastRemoteKey = key; applyRemote(s); }
+    }
+    renderPeople();
+  }
+
+  const es = new EventSource(`${ROOT}.json`);
+  es.addEventListener("put", (e) => { applyEvent("put", JSON.parse(e.data)); loaded = true; showConn(true); onTree(); });
+  es.addEventListener("patch", (e) => { applyEvent("patch", JSON.parse(e.data)); onTree(); });
+  es.addEventListener("cancel", () => showConn(false));
+  es.onerror = () => { showConn(false); if (!loaded) $("joinText").textContent = "Não consegui falar com a sala. Confira a internet."; };
+  es.onopen = () => showConn(true);
+
+  async function heartbeat() {
+    try {
+      const sent = Date.now();
+      const r = await api("PUT", `/people/${me}`, { name: myName, lastSeen: SV, platform: "web" });
+      const got = Date.now();
+      if (r && r.lastSeen) offset = r.lastSeen - (sent + got) / 2;
+      showConn(true);
+    } catch (_) { showConn(false); }
+  }
+
+  // ---------- Entrar ----------
+  $("name").addEventListener("input", () => { $("enter").disabled = !$("name").value.trim() || !tree || !tree.video; });
+  $("name").addEventListener("keydown", (e) => { if (e.key === "Enter" && !$("enter").disabled) $("enter").click(); });
+  $("enter").addEventListener("click", async () => {
+    myName = $("name").value.trim().slice(0, 24);
+    localStorage.setItem("estante-nome", myName);
+    const v = tree.video;
+    $("movie").textContent = v.title;
+    $("code").textContent = `Sala ${code}`;
+    document.title = `${v.title} · Estante`;
+    video.src = `https://www.googleapis.com/drive/v3/files/${v.fileId}?alt=media&supportsAllDrives=true&key=${v.key}`;
+    $("join").style.display = "none";
+    $("room").style.display = "flex";
+    joined = true;
+    await heartbeat();
+    setInterval(heartbeat, 10000);
+    loadSubtitle(v);
+    // Toque no botão Entrar conta como gesto: deixa o Safari tocar com som.
+    if (tree.state) applyRemote(tree.state);
+    renderPeople();
+  });
+
+  addEventListener("pagehide", () => { if (joined) api("DELETE", `/people/${me}`).catch(() => {}); });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && joined) { heartbeat(); if (lastState) applyRemote(lastState); } });
+})();
+</script>
+</body>
+</html>

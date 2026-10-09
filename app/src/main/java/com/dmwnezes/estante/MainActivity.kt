@@ -98,6 +98,7 @@ sealed interface Screen {
     data class Series(val id: String) : Screen
     data object Settings : Screen
     data class Player(val queue: List<String>, val start: Int, val fromStart: Boolean) : Screen
+    data class Party(val videoId: String) : Screen
 }
 
 @Composable
@@ -237,6 +238,11 @@ fun EstanteApp() {
                 )
             }
             Screen.Settings -> SettingsScreen(onBack = ::back, onCheckUpdate = { showUpdate = true }, updateAvailable = newerAvailable)
+            is Screen.Party -> {
+                val v = state.video(s.videoId)
+                if (v == null) LaunchedEffect(Unit) { back() }
+                else com.dmwnezes.estante.party.PartyScreen(v, onBack = ::back, onOpenSettings = { back(); go(Screen.Settings) })
+            }
             is Screen.Player -> {
                 val queue = s.queue.mapNotNull { library.current.video(it) }
                 if (queue.isEmpty()) LaunchedEffect(Unit) { back() }
@@ -255,6 +261,7 @@ fun EstanteApp() {
             onAddToList = { openVideo = null; listVideo = id },
             onRemove = { openVideo = null; library.remove(id) },
             onDismiss = { openVideo = null },
+            onParty = { openVideo = null; go(Screen.Party(id)) },
         )
     }
     editVideo?.let { id ->

@@ -47,6 +47,7 @@ import androidx.compose.material.icons.rounded.CheckBoxOutlineBlank
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -109,6 +110,7 @@ fun VideoSheet(
     onAddToList: () -> Unit,
     onRemove: () -> Unit,
     onDismiss: () -> Unit,
+    onParty: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -188,6 +190,10 @@ fun VideoSheet(
                 PillButton("Assistir do início", Icons.Rounded.Replay, { play(true) }, Modifier.fillMaxWidth(), filled = false)
             } else {
                 PillButton(if (video.finished) "Assistir de novo" else "Assistir", Icons.Rounded.PlayArrow, { play(true) }, Modifier.fillMaxWidth())
+            }
+            if (onParty != null && video.source == Source.DRIVE) {
+                Spacer(Modifier.height(10.dp))
+                PillButton("Assistir junto", Icons.Rounded.Groups, onParty, Modifier.fillMaxWidth(), filled = false)
             }
             Spacer(Modifier.height(14.dp))
             SheetAction(Icons.Rounded.Edit, "Editar capa e título", onEdit)

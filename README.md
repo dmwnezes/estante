@@ -12,6 +12,7 @@ App Android que transforma seus vídeos do Google Drive (e do celular) numa esta
 - **Continuar de onde parou:** posição salva a cada 5 s, ao pausar e ao sair. Começados em "Continuar assistindo", terminados com selo.
 - **Listas de reprodução:** junte vídeos para tocar em sequência.
 - **Player:** tela cheia, legendas .srt/.vtt (achadas na pasta do Drive ou escolhidas no celular, com acentos corrigidos), gestos (brilho à esquerda, volume à direita, toque duplo para ±10 s), janelinha flutuante e envio para a TV (Chromecast / Google TV).
+- **Assistir junto:** abra uma sala a partir de um filme do Drive e mande o link. Quem abrir (até no iPhone, pelo site) assiste ao mesmo tempo, com play/pause valendo para todos, lista de quem está na sala e chat.
 - **Atualização dentro do app:** Ajustes > Buscar atualização.
 
 ## Instalar no celular
@@ -38,6 +39,35 @@ O Google só deixa um app ler o Drive depois que ele é registrado num projeto d
 
 A permissão é só de **leitura**: o app lista e toca os vídeos, nunca altera nem apaga nada no Drive.
 
+## Assistir junto
+
+Você abre a sala no app; a outra pessoa entra pelo site **https://dmwnezes.github.io/estante/sala/** (o link já vem pronto no botão Convidar). Configuração de uma vez só:
+
+**1. Banco do Firebase (leva play/pause e o chat entre o app e o site)**
+1. Entre em [console.firebase.google.com](https://console.firebase.google.com) e toque em **Adicionar projeto**.
+2. Escolha o projeto do Google Cloud que você já criou para a Estante (aparece na lista). Pode desligar o Google Analytics.
+3. No menu, abra **Realtime Database** > **Criar banco de dados** > escolha o local (Estados Unidos) > **modo bloqueado**.
+4. Na aba **Regras**, apague tudo, cole isto e toque em **Publicar**:
+   ```json
+   { "rules": { "salas": { "$sala": { ".read": true, ".write": true } } } }
+   ```
+5. Na aba **Dados**, copie o endereço que aparece em cima (termina em `firebaseio.com`).
+
+**2. Chave de API do Google (para o site ler o filme do Drive)**
+1. Em [console.cloud.google.com](https://console.cloud.google.com), no mesmo projeto: **APIs e serviços > Credenciais > Criar credenciais > Chave de API**.
+2. Toque na chave criada para restringir: em **Restrições de aplicativos** escolha **Referenciadores HTTP** e adicione `dmwnezes.github.io/*`; em **Restrições de API** escolha só a **Google Drive API**. Salve e copie a chave (começa com `AIza`).
+
+**3. Ligar o site no GitHub**
+No repositório: **Settings > Pages > Build and deployment > Deploy from a branch**, branch **main**, pasta **/docs**, **Save**. Em um ou dois minutos o site fica no ar.
+
+**4. Compartilhar os filmes**
+No Drive, compartilhe a pasta dos filmes como **Qualquer pessoa com o link · Leitor** (assim vale para todos de uma vez). Sem isso o iPhone não tem permissão de ler o arquivo. O app avisa se o filme ainda não estiver compartilhado.
+
+**5. No app**
+**Ajustes > Assistir junto**: cole o endereço do banco e a chave, escreva seu nome e toque em **Salvar e testar**. Depois é só abrir um filme do Drive e tocar em **Assistir junto**.
+
+**Formatos:** o Safari do iPhone toca **MP4** e **MOV** (H.264 ou HEVC). MKV e AVI não abrem no iPhone; o app avisa antes.
+
 ## Capas da internet (opcional)
 
 1. Crie uma conta grátis em [themoviedb.org](https://www.themoviedb.org/signup).
@@ -63,8 +93,11 @@ app/src/main/java/com/dmwnezes/estante/
 ├── data/                  estante (JSON), séries, retomada, capas, TMDB, importação e sincronização
 ├── drive/                 login do Google (só leitura) e API do Drive
 ├── player/                player, legendas, gestos, janelinha e envio para a TV
+├── party/                 assistir junto: Firebase (REST), sincronia, sala e chat
 ├── update/                atualização pelas Releases do GitHub
 └── ui/                    estante, DVD, tábua, listas, Drive, ajustes e abertura
 ```
+
+O site da sala fica em `docs/sala/index.html` (GitHub Pages).
 
 Cada `push` na branch `main` roda os testes, compila o APK no GitHub Actions e publica em **Releases**.
