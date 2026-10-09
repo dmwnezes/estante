@@ -9,7 +9,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.material.icons.rounded.ZoomInMap
+import androidx.compose.material.icons.rounded.ZoomOutMap
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -41,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -56,7 +60,14 @@ private data class Hud(val icon: ImageVector, val text: String, val align: Align
  * - toque simples = mostra os controles.
  */
 @Composable
-fun GestureLayer(enabled: Boolean, activity: Activity?, onTap: () -> Unit, onSeek: (forward: Boolean) -> Unit) {
+fun GestureLayer(
+    enabled: Boolean,
+    activity: Activity?,
+    onTap: () -> Unit,
+    onSeek: (forward: Boolean) -> Unit,
+    fill: Boolean = false,
+    onFill: (Boolean) -> Unit = {},
+) {
     val context = LocalContext.current
     val audio = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     var hud by remember { mutableStateOf<Hud?>(null) }
@@ -89,6 +100,52 @@ fun GestureLayer(enabled: Boolean, activity: Activity?, onTap: () -> Unit, onSee
     Box(
         Modifier.fillMaxSize().then(
             if (!enabled) Modifier else Modifier
+                .pointerInput(fill) {
+                    // Um dedo deslizando na vertical = brilho/volume; dois dedos em pinça = preencher a tela.
+                    val maxVol = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        val left = down.position.x < size.width / 2
+                        var level = if (left) currentBrightness() else audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / maxVol
+                        var mode = 0 // 0 = indefinido, 1 = arrastando, 2 = pinça
+                        var startSpan = 0f
+                        var done = false
+                        while (true) {
+                            // Fase "Initial": decide antes do detector de toques, que então ignora pinça e arrasto.
+                            val ev = awaitPointerEvent(PointerEventPass.Initial)
+                            val pressed = ev.changes.filter { it.pressed }
+                            if (pressed.isEmpty()) break
+                            if (pressed.size >= 2) {
+                                val span = (pressed[0].position - pressed[1].position).getDistance()
+                                if (mode != 2) { mode = 2; startSpan = span }
+                                ev.changes.forEach { it.consume() }
+                                if (!done && startSpan > 0) {
+                                    val z = span / startSpan
+                                    if (z > 1.18f && !fill) { onFill(true); done = true; show(Hud(Icons.Rounded.ZoomOutMap, "Preenchendo a tela", Alignment.Center)) }
+                                    if (z < 0.85f && fill) { onFill(false); done = true; show(Hud(Icons.Rounded.ZoomInMap, "Vídeo inteiro", Alignment.Center)) }
+                                }
+                                continue
+                            }
+                            if (mode == 2) continue
+                            val c = pressed[0]
+                            val dy = c.position.y - c.previousPosition.y
+                            if (mode == 0) {
+                                val moved = c.position - down.position
+                                if (kotlin.math.abs(moved.y) > viewConfiguration.touchSlop && kotlin.math.abs(moved.y) > kotlin.math.abs(moved.x)) mode = 1
+                                else continue
+                            }
+                            c.consume()
+                            level = (level - dy / (size.height * 0.75f)).coerceIn(0f, 1f)
+                            if (left) {
+                                activity?.window?.let { w -> w.attributes = w.attributes.apply { screenBrightness = level.coerceAtLeast(0.01f) } }
+                                show(Hud(Icons.Rounded.LightMode, "${(level * 100).toInt()}%", Alignment.Center, level))
+                            } else {
+                                audio.setStreamVolume(AudioManager.STREAM_MUSIC, (level * maxVol).toInt(), 0)
+                                show(Hud(Icons.AutoMirrored.Rounded.VolumeUp, "${(level * 100).toInt()}%", Alignment.Center, level))
+                            }
+                        }
+                    }
+                }
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = { onTap() },
@@ -106,28 +163,6 @@ fun GestureLayer(enabled: Boolean, activity: Activity?, onTap: () -> Unit, onSee
                         },
                     )
                 }
-                .pointerInput(Unit) {
-                    var left = true
-                    var level = 0f
-                    val maxVol = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-                    detectVerticalDragGestures(
-                        onDragStart = { off ->
-                            left = off.x < size.width / 2
-                            level = if (left) currentBrightness() else audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / maxVol
-                        },
-                        onVerticalDrag = { change, dy ->
-                            change.consume()
-                            level = (level - dy / (size.height * 0.75f)).coerceIn(0f, 1f)
-                            if (left) {
-                                activity?.window?.let { w -> w.attributes = w.attributes.apply { screenBrightness = level.coerceAtLeast(0.01f) } }
-                                show(Hud(Icons.Rounded.LightMode, "${(level * 100).toInt()}%", Alignment.Center, level))
-                            } else {
-                                audio.setStreamVolume(AudioManager.STREAM_MUSIC, (level * maxVol).toInt(), 0)
-                                show(Hud(Icons.AutoMirrored.Rounded.VolumeUp, "${(level * 100).toInt()}%", Alignment.Center, level))
-                            }
-                        },
-                    )
-                }
         ),
     ) {
         AnimatedVisibility(hud != null, Modifier.align(hud?.align ?: Alignment.Center), enter = fadeIn(), exit = fadeOut()) {
@@ -142,7 +177,7 @@ fun GestureLayer(enabled: Boolean, activity: Activity?, onTap: () -> Unit, onSee
                         Spacer(Modifier.width(10.dp))
                         if (h.level != null) {
                             Box(Modifier.width(120.dp).height(6.dp).clip(RoundedCornerShape(3.dp)).background(Color.White.copy(alpha = 0.25f))) {
-                                Box(Modifier.fillMaxWidth(h.level).height(6.dp).background(Color(0xFFF0A94B)))
+                                Box(Modifier.fillMaxWidth(h.level).height(6.dp).background(Color(0xFF9B8CFF)))
                             }
                             Spacer(Modifier.width(10.dp))
                         }

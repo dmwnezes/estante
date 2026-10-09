@@ -14,20 +14,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dmwnezes.estante.R
 
-/** Paleta "Sala de cinema": parede escura e quente, madeira e luz âmbar. */
+/** Paleta "Noite suave", a mesma do Palavreiro: azul-escuro e roxo aveludados, lavanda, verde e amarelo. */
 object Cinema {
-    val bgTop = Color(0xFF2E211B)
-    val bgBottom = Color(0xFF130D0B)
-    val surface = Color(0xFF2A1F1A)
-    val surfaceHigh = Color(0xFF3A2C25)
-    val outline = Color(0xFF574538)
-    val text = Color(0xFFF7EEE6)
-    val muted = Color(0xFFBFAE9F)
-    val accent = Color(0xFFF0A94B)
-    val onAccent = Color(0xFF2A1A0E)
+    val bgTop = Color(0xFF2A2058)
+    val bgBottom = Color(0xFF120E2B)
+    val surface = Color(0xFF231C48)
+    val surfaceHigh = Color(0xFF2F275C)
+    val outline = Color(0xFF4A4180)
+    val text = Color(0xFFF4F1FF)
+    val muted = Color(0xFFA9A2D0)
+    val accent = Color(0xFF9B8CFF)
+    val onAccent = Color(0xFF1A1438)
     val red = Color(0xFFE5737A)
+    /** Verde e amarelo do Palavreiro: assistido / destaque. */
+    val green = Color(0xFF5FB873)
+    val yellow = Color(0xFFE6C14F)
+    /** Fundo do chat da sala e campos. */
+    val field = Color(0xFF1C1640)
 
-    // Madeira da estante
+    // Madeira (usada pelos temas de madeira)
     val woodTop = Color(0xFFB07C50)
     val woodFront = Color(0xFF7E522F)
     val woodDark = Color(0xFF4A2F1B)
@@ -37,8 +42,8 @@ object Cinema {
 
     /** Cores das capas geradas (quando o DVD não tem imagem). */
     val coverHues = listOf(
-        Color(0xFFC8643F), Color(0xFFF0A94B), Color(0xFF5E8C7A), Color(0xFF5C6FA8),
-        Color(0xFF9A5B8C), Color(0xFFB8893E), Color(0xFF4E7FA0), Color(0xFF8C4A3E),
+        Color(0xFF7A6BE0), Color(0xFFE6C14F), Color(0xFF5FB873), Color(0xFF5C6FA8),
+        Color(0xFFB48CF0), Color(0xFFE5737A), Color(0xFF4E7FA0), Color(0xFF6FA8E8),
     )
 }
 
@@ -74,7 +79,7 @@ fun EstanteTheme(content: @Composable () -> Unit) {
         colorScheme = darkColorScheme(
             primary = Cinema.accent,
             onPrimary = Cinema.onAccent,
-            secondary = Cinema.woodTop,
+            secondary = Cinema.green,
             background = Cinema.bgBottom,
             surface = Cinema.surface,
             surfaceVariant = Cinema.surfaceHigh,

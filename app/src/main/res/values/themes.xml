@@ -5,7 +5,7 @@
         <item name="android:windowBackground">@drawable/window_bg</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="colorAccent">#FFF0A94B</item>
-        <item name="colorPrimary">#FF2A1F1A</item>
+        <item name="colorAccent">#FF9B8CFF</item>
+        <item name="colorPrimary">#FF231C48</item>
     </style>
 </resources>

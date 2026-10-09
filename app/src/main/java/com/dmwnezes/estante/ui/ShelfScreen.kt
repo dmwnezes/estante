@@ -100,6 +100,9 @@ fun filterItems(items: List<ShelfItem>, query: String): List<ShelfItem> {
     }
 }
 
+/** Prateleira especial: soltar um DVD nela marca como favorito. */
+const val FAV_SHELF = "__favoritos__"
+
 /** Para onde o DVD arrastado vai: prateleira e antes de qual item (nulo = no fim). */
 data class DropTarget(val shelf: String, val beforeId: String?, val highlightId: String?)
 
@@ -148,15 +151,20 @@ fun ShelfScreen(
 
     fun itemAt(p: Offset): ShelfItem? {
         val root = p + origin
-        val id = slots.entries.firstOrNull { it.value.contains(root) }?.key ?: return null
+        val id = slots.entries.firstOrNull { it.value.contains(root) }?.key?.removePrefix("fav:") ?: return null
         return all.firstOrNull { it.id == id }
     }
 
     fun computeTarget(p: Offset): DropTarget? {
         val root = p + origin
         val moving = dragged ?: return null
+        // Na prateleira dourada: vira favorito.
+        if (slots.entries.any { it.key.startsWith("fav:") && it.value.contains(root) } ||
+            rows.entries.any { it.key.startsWith("fav#") && it.value.second.contains(root) } ||
+            labels[FAV_SHELF]?.inflate(16f)?.contains(root) == true
+        ) return if (moving.favorite) null else DropTarget(FAV_SHELF, null, null)
         // Em cima de um DVD: entra antes dele (metade esquerda) ou depois (metade direita).
-        slots.entries.firstOrNull { it.value.contains(root) && it.key != moving.id }?.let { (id, r) ->
+        slots.entries.firstOrNull { it.value.contains(root) && it.key != moving.id && !it.key.startsWith("fav:") }?.let { (id, r) ->
             val item = all.firstOrNull { it.id == id } ?: return null
             val shelfList = shelvesShown.firstOrNull { it.first == item.shelf }?.second ?: return null
             val i = shelfList.indexOfFirst { it.id == id }
@@ -164,9 +172,9 @@ fun ShelfScreen(
             return DropTarget(item.shelf, before, id)
         }
         // Num espaço vazio da fileira: vai para depois do último DVD dela.
-        rows.values.firstOrNull { it.second.contains(root) }?.let { (shelf, _) ->
+        rows.entries.filterNot { it.key.startsWith("fav#") }.map { it.value }.firstOrNull { it.second.contains(root) }?.let { (shelf, _) ->
             val shelfList = shelvesShown.firstOrNull { it.first == shelf }?.second.orEmpty()
-            val rowKeyItems = rows.entries.firstOrNull { it.value.second.contains(root) }?.key
+            val rowKeyItems = rows.entries.firstOrNull { !it.key.startsWith("fav#") && it.value.second.contains(root) }?.key
             val rowIndex = rowKeyItems?.substringAfterLast('#')?.toIntOrNull() ?: return DropTarget(shelf, null, null)
             val after = shelfList.chunked(columns).getOrNull(rowIndex)?.lastOrNull()
             val idx = shelfList.indexOfFirst { it.id == after?.id }
@@ -174,7 +182,7 @@ fun ShelfScreen(
             return DropTarget(shelf, before, null)
         }
         // Na plaquinha: vai para o fim daquela prateleira.
-        labels.entries.firstOrNull { it.value.inflate(16f).contains(root) }?.let { return DropTarget(it.key, null, null) }
+        labels.entries.firstOrNull { it.key != FAV_SHELF && it.value.inflate(16f).contains(root) }?.let { return DropTarget(it.key, null, null) }
         return null
     }
 
@@ -195,7 +203,11 @@ fun ShelfScreen(
         }
     }
 
-    CompositionLocalProvider(LocalShelfTheme provides theme) {
+    // Luz da estante: confere a hora a cada minuto.
+    val lit by androidx.compose.runtime.produceState(ShelfLight.lit(), ShelfLight.mode) {
+        while (true) { value = ShelfLight.lit(); kotlinx.coroutines.delay(60_000) }
+    }
+    CompositionLocalProvider(LocalShelfTheme provides theme, LocalShelfLit provides lit) {
         Box(
             Modifier.fillMaxSize().background(theme.wall)
                 .onGloballyPositioned { origin = it.positionInRoot() }
@@ -268,6 +280,36 @@ fun ShelfScreen(
                             ContinueRow(going, state, onResume)
                         }
                     }
+                    val favs = all.filter { it.favorite }.sortedBy(sort)
+                    if (query.isBlank() && (favs.isNotEmpty() || dragged != null)) {
+                        item(key = "label-fav") {
+                            ShelfLabel(
+                                "★ Favoritos", favs.size,
+                                Modifier.padding(top = 8.dp).onGloballyPositioned { labels[FAV_SHELF] = it.boundsInRoot() },
+                                theme = GoldTheme,
+                            )
+                        }
+                        if (favs.isEmpty()) item(key = "fav-empty") {
+                            Text(
+                                "Solte aqui para favoritar", color = Cinema.yellow, textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(14.dp).onGloballyPositioned { rows["fav#0"] = FAV_SHELF to it.boundsInRoot() },
+                            )
+                            Plank(Modifier.padding(horizontal = 14.dp), theme = GoldTheme)
+                        }
+                        favs.chunked(columns).forEachIndexed { i, row ->
+                            item(key = "fav-${row.first().id}") {
+                                ItemRow(
+                                    row, columns, rowKey = "fav#$i", draggedId = dragged?.id, highlightId = null,
+                                    onOpen = onOpen, onSlot = { id, r -> slots["fav:$id"] = r }, onRow = { key, r -> rows[key] = FAV_SHELF to r },
+                                    plankTheme = GoldTheme,
+                                )
+                            }
+                        }
+                    }
+                    val pile = all.filter { it.toWatch }.sortedBy { it.addedAt }
+                    if (query.isBlank() && pile.isNotEmpty()) {
+                        item(key = "pile") { Pile(pile, onOpen) }
+                    }
                     if (query.isNotBlank() && filtered.isEmpty()) {
                         item(key = "none") {
                             Text("Nada encontrado para “$query”.", color = Cinema.muted, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(40.dp))
@@ -334,8 +376,9 @@ private fun ItemRow(
     onOpen: (ShelfItem) -> Unit,
     onSlot: (String, Rect) -> Unit,
     onRow: (String, Rect) -> Unit,
+    plankTheme: ShelfTheme? = null,
 ) {
-    Column(Modifier.fillMaxWidth().onGloballyPositioned { onRow(rowKey, it.boundsInRoot()) }) {
+    Column(Modifier.fillMaxWidth().onGloballyPositioned { onRow(rowKey, it.boundsInRoot()) }.shelfGlow(LocalShelfLit.current)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 14.dp).offset(y = 5.dp).zIndex(1f),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -358,7 +401,7 @@ private fun ItemRow(
                 }
             }
         }
-        Plank()
+        Plank(theme = plankTheme)
         Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             for (i in 0 until columns) {
                 Box(Modifier.weight(1f)) {
@@ -443,7 +486,7 @@ private fun Header(
 /** Fileira que rola de lado com os vídeos começados, sobre uma tábua fixa. */
 @Composable
 private fun ContinueRow(videos: List<Video>, state: LibraryState, onResume: (Video) -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(bottom = 14.dp)) {
+    Column(Modifier.fillMaxWidth().padding(bottom = 14.dp).shelfGlow(LocalShelfLit.current)) {
         LazyRow(
             Modifier.fillMaxWidth().offset(y = 5.dp).zIndex(1f),
             contentPadding = PaddingValues(horizontal = 14.dp),
@@ -523,5 +566,39 @@ fun PillButton(
             Spacer(Modifier.width(8.dp))
         }
         Text(text, color = if (enabled) fg else fg.copy(alpha = 0.6f), fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+    }
+}
+
+/**
+ * Pilha "para ver": DVDs deitados empilhados num canto da estante, os mais antigos embaixo.
+ * Tocar numa lombada abre o DVD.
+ */
+@Composable
+private fun Pile(items: List<ShelfItem>, onOpen: (ShelfItem) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(top = 14.dp).shelfGlow(LocalShelfLit.current)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.Bottom) {
+            Column(Modifier.weight(0.62f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                val shown = items.takeLast(9).reversed() // mais novo em cima
+                shown.forEachIndexed { i, item ->
+                    val shift = listOf(0, 7, -4, 10, 2, -6, 5, -2, 8)[i % 9]
+                    LyingCase(
+                        item.title,
+                        when (item) { is ShelfItem.Single -> item.video.cover; is ShelfItem.Series -> item.box.cover },
+                        item is ShelfItem.Series,
+                        Modifier.fillMaxWidth(0.92f).offset(x = shift.dp),
+                    ) { onOpen(item) }
+                }
+            }
+            Column(Modifier.weight(0.38f).padding(start = 12.dp, bottom = 6.dp)) {
+                Text("Pilha para ver", color = Cinema.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (items.size == 1) "1 esperando" else "${items.size} esperando" + if (items.size > 9) " (mostrando 9)" else "",
+                    color = Cinema.muted, fontSize = 12.sp,
+                )
+                Text("Sai da pilha sozinho quando você termina.", color = Cinema.muted.copy(alpha = 0.7f), fontSize = 11.sp, lineHeight = 13.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+        }
+        Plank(Modifier.offset(y = (-2).dp))
+        Spacer(Modifier.height(8.dp))
     }
 }

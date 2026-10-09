@@ -15,6 +15,12 @@ data class PlayState(
 
 data class Person(val id: String, val name: String, val lastSeen: Long, val platform: String)
 
+/** Emoji mandado na sala (sobe por cima do filme nos dois celulares). */
+data class Reaction(val id: String, val emoji: String, val name: String, val at: Long, val by: String)
+
+/** Reações permitidas (as mesmas do site). */
+val REACTIONS = listOf("😂", "😱", "❤️", "👏", "😭", "🍿")
+
 data class ChatMessage(val id: String, val name: String, val text: String, val at: Long, val by: String, val image: String? = null)
 
 /** Contas da sincronia (sem Android, para poder testar). */
@@ -32,6 +38,16 @@ object PartySync {
 
     /** Diferença entre o relógio do celular e o do servidor, a partir de uma ida e volta. */
     fun offset(sentAt: Long, receivedAt: Long, serverTs: Long): Long = serverTs - (sentAt + receivedAt) / 2
+
+    /** Está digitando se avisou nos últimos 4 s. */
+    fun typing(at: Long, serverNow: Long) = serverNow - at in 0..4_000
+
+    /** "Mandis está digitando…" / "Mandis e Ana estão digitando…". */
+    fun typingLabel(names: List<String>): String? = when (names.size) {
+        0 -> null
+        1 -> "${names[0]} está digitando…"
+        else -> names.dropLast(1).joinToString(", ") + " e ${names.last()} estão digitando…"
+    }
 
     /** Está na sala se deu sinal de vida nos últimos 25 s. */
     fun online(p: Person, serverNow: Long) = serverNow - p.lastSeen < 25_000

@@ -47,6 +47,10 @@ import androidx.compose.material.icons.rounded.CheckBoxOutlineBlank
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.Layers
+import androidx.compose.foundation.border
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Language
@@ -111,6 +115,7 @@ fun VideoSheet(
     onRemove: () -> Unit,
     onDismiss: () -> Unit,
     onParty: (() -> Unit)? = null,
+    onDiary: ((String) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -195,7 +200,29 @@ fun VideoSheet(
                 Spacer(Modifier.height(10.dp))
                 PillButton("Assistir junto", Icons.Rounded.Groups, onParty, Modifier.fillMaxWidth(), filled = false)
             }
+            // Já assistiram juntos: atalho para o diário.
+            val together = remember(video.id) { AppGraph.diary.forVideo(video.id) }
+            together.firstOrNull()?.let { last ->
+                Text(
+                    "Assistido junto ${com.dmwnezes.estante.party.withWhom(last, com.dmwnezes.estante.party.PartyConfig.name)}" +
+                        (if (together.size > 1) " (${together.size} vezes)" else "") + " · ver no diário",
+                    color = Cinema.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 10.dp).clip(Shapes.pill).clickable { onDiary?.invoke(last.id) }.padding(horizontal = 6.dp, vertical = 4.dp),
+                )
+            }
             Spacer(Modifier.height(14.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ToggleChip(
+                    if (video.favorite) "Favorito" else "Favoritar",
+                    if (video.favorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                    video.favorite, Cinema.yellow, Modifier.weight(1f),
+                ) { AppGraph.library.setFavorite(video.id, !video.favorite) }
+                ToggleChip(
+                    if (video.toWatch) "Na pilha" else "Pôr na pilha",
+                    Icons.Rounded.Layers, video.toWatch, Cinema.accent, Modifier.weight(1f),
+                ) { AppGraph.library.setToWatch(video.id, !video.toWatch) }
+            }
+            Spacer(Modifier.height(4.dp))
             SheetAction(Icons.Rounded.Edit, "Editar capa e título", onEdit)
             SheetAction(Icons.AutoMirrored.Rounded.PlaylistAdd, "Adicionar a uma lista", onAddToList)
             SheetAction(
@@ -595,5 +622,21 @@ fun CheckRow(text: String, checked: Boolean, onClick: () -> Unit) {
         Icon(if (checked) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank, null, tint = Cinema.accent)
         Spacer(Modifier.width(10.dp))
         Text(text, color = Cinema.text, fontSize = 14.sp)
+    }
+}
+
+/** Botão liga/desliga em forma de pílula (favoritar, pilha para ver). */
+@Composable
+fun ToggleChip(text: String, icon: ImageVector, on: Boolean, color: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Row(
+        modifier.clip(Shapes.pill).background(if (on) color.copy(alpha = 0.18f) else Cinema.surfaceHigh)
+            .then(if (on) Modifier.border(1.dp, color.copy(alpha = 0.6f), Shapes.pill) else Modifier)
+            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Icon(icon, null, tint = if (on) color else Cinema.muted, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(text, color = if (on) color else Cinema.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }

@@ -25,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.SystemUpdate
@@ -49,8 +50,9 @@ import androidx.compose.ui.unit.sp
 import com.dmwnezes.estante.AppGraph
 import com.dmwnezes.estante.update.Updater
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onCheckUpdate: () -> Unit, updateAvailable: Boolean) {
+fun SettingsScreen(onBack: () -> Unit, onCheckUpdate: () -> Unit, updateAvailable: Boolean, onDiary: () -> Unit = {}) {
     val context = LocalContext.current
     val account by AppGraph.auth.account.collectAsState()
     var confirmLogout by remember { mutableStateOf(false) }
@@ -74,13 +76,44 @@ fun SettingsScreen(onBack: () -> Unit, onCheckUpdate: () -> Unit, updateAvailabl
 
             Section("Aparência da estante") {
                 ThemePicker()
+                Spacer(Modifier.height(14.dp))
+                Text("Luz de LED nas tábuas", color = Cinema.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                ) {
+                    ShelfLight.Mode.entries.forEach { m -> Chip(m.label, selected = ShelfLight.mode == m) { ShelfLight.select(m) } }
+                }
+            }
+
+            Section("Player") {
+                var recap by remember { mutableStateOf(AppGraph.prefs.getBoolean("recap", true)) }
+                CheckRow("Ao continuar, voltar 10 s para lembrar a cena", recap) {
+                    recap = !recap
+                    AppGraph.prefs.edit().putBoolean("recap", recap).apply()
+                    com.dmwnezes.estante.data.Resume.recapMs = if (recap) 10_000 else 0
+                }
+                var thumbs by remember { mutableStateOf(AppGraph.prefs.getBoolean("thumbsMobile", false)) }
+                CheckRow("Gerar miniaturas da barra também no 4G (gasta mais internet)", thumbs) {
+                    thumbs = !thumbs
+                    AppGraph.prefs.edit().putBoolean("thumbsMobile", thumbs).apply()
+                }
             }
 
             Section("Capas da internet") { TmdbSettings() }
 
             Section("Pastas sincronizadas") { SyncSettings() }
 
-            Section("Assistir junto") { PartySettings() }
+            Section("Assistir junto") {
+                val diary by AppGraph.diary.entries.collectAsState()
+                PillButton(
+                    if (diary.isEmpty()) "Diário de sessões" else "Diário de sessões (${diary.size})",
+                    androidx.compose.material.icons.Icons.Rounded.Groups, onDiary,
+                )
+                Spacer(Modifier.height(14.dp))
+                PartySettings()
+            }
 
             Section("Configurar o Google (uma vez só)") {
                 Text(

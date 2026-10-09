@@ -25,6 +25,7 @@ object AppGraph {
     lateinit var images: ImageLoader; private set
     lateinit var tmdb: Tmdb; private set
     lateinit var prefs: SharedPreferences; private set
+    lateinit var diary: com.dmwnezes.estante.party.SessionDiary; private set
 
     private var ready = false
 
@@ -43,6 +44,7 @@ object AppGraph {
         images = ImageLoader.Builder(app).okHttpClient(driveHttp).crossfade(true).build()
         tmdb = Tmdb(app, http)
         prefs = app.getSharedPreferences("app", Context.MODE_PRIVATE)
+        diary = com.dmwnezes.estante.party.SessionDiary(app.filesDir)
         ready = true
     }
 }

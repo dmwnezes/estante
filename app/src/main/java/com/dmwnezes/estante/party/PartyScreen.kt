@@ -57,6 +57,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -151,7 +154,7 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
 
     DisposableEffect(Unit) { onDispose { session?.leave() } }
 
-    Box(Modifier.fillMaxSize().background(Color(0xFF17120F))) {
+    Box(Modifier.fillMaxSize().background(Cinema.bgBottom)) {
         if (step == Step.ROOM && session != null) {
             Room(video, session!!, onBack)
             return@Box
@@ -226,6 +229,22 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
     val view = LocalView.current
     val people by session.people.collectAsState()
     val messages by session.messages.collectAsState()
+    val typing by session.typing.collectAsState()
+    val reactions by session.reactions.collectAsState()
+    // Relógio de 1 s para o "digitando…" sumir na hora certa.
+    val tick by androidx.compose.runtime.produceState(0L) { while (true) { value = session.serverNow(); delay(1_000) } }
+    val typingNames = typing.values.filter { PartySync.typing(it.second, tick) }.map { it.first }
+
+    fun saveDiary() {
+        runCatching {
+            AppGraph.diary.save(
+                "${session.code}-${session.startedAt}", video.id, video.title, video.cover,
+                session.startedAt, System.currentTimeMillis(), session.everyone.values, session.messages.value, session.me,
+            )
+        }
+    }
+    // Guarda no diário de minuto em minuto (e ao sair).
+    LaunchedEffect(Unit) { while (true) { delay(60_000); kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { saveDiary() } } }
     val host by session.host.collectAsState()
     val remote by session.remote.collectAsState()
     val error by session.error.collectAsState()
@@ -298,6 +317,7 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
         onDispose {
             player.removeListener(l)
             AppGraph.library.savePosition(video.id, player.currentPosition, player.duration.takeIf { it > 0 } ?: 0L)
+            saveDiary()
             player.release()
         }
     }
@@ -379,6 +399,7 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
             if (!full) IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Sair da sala", tint = Color.White)
             }
+            FloatingReactions(reactions, since = session.startedAt - 5_000, serverNow = { session.serverNow() })
         }
         if (full) return@Column
 
@@ -386,16 +407,16 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
         val online = people.filter { PartySync.online(it, now) }
         if (imeVisible) {
             Row(
-                Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth().clip(Shapes.pill).background(Color(0xFF241D19))
+                Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth().clip(Shapes.pill).background(Cinema.surface)
                     .padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy((-8).dp)) {
                     online.take(5).forEach { p ->
                         Box(
-                            Modifier.size(24.dp).clip(CircleShape).background(Color(0xFF241D19)).padding(1.5.dp).clip(CircleShape).background(personColor(p.name)),
+                            Modifier.size(24.dp).clip(CircleShape).background(Cinema.surface).padding(1.5.dp).clip(CircleShape).background(personColor(p.name)),
                             contentAlignment = Alignment.Center,
-                        ) { Text(p.name.trim().take(1).uppercase(), color = Color(0xFF1A1310), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold) }
+                        ) { Text(p.name.trim().take(1).uppercase(), color = Cinema.onAccent, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold) }
                     }
                 }
                 Spacer(Modifier.width(10.dp))
@@ -406,7 +427,7 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
                 Text("Sala ${session.code}", color = Cinema.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
         } else Column(
-            Modifier.padding(12.dp).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color(0xFF241D19)).padding(14.dp),
+            Modifier.padding(12.dp).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Cinema.surface).padding(14.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -452,25 +473,48 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
             }
         }
 
+        // "Fulana está digitando…"
+        androidx.compose.animation.AnimatedVisibility(typingNames.isNotEmpty()) {
+            Row(Modifier.padding(start = 18.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                TypingDots()
+                Spacer(Modifier.width(8.dp))
+                Text(PartySync.typingLabel(typingNames).orEmpty(), color = Cinema.muted, fontSize = 12.sp)
+            }
+        }
+        // Reações rápidas (somem com o teclado aberto)
+        if (!imeVisible) Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(top = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            REACTIONS.forEach { e ->
+                Box(
+                    Modifier.size(44.dp).clip(CircleShape).background(Cinema.surface).clickable { session.sendReaction(e) },
+                    contentAlignment = Alignment.Center,
+                ) { Text(e, fontSize = 22.sp) }
+            }
+        }
         // Escrever
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(
                 onClick = { pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                 enabled = !sendingPhoto,
-                modifier = Modifier.size(48.dp).clip(CircleShape).background(Color(0xFF241D19)),
+                modifier = Modifier.size(48.dp).clip(CircleShape).background(Cinema.surface),
             ) {
                 if (sendingPhoto) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Cinema.accent)
                 else Icon(Icons.Rounded.Image, "Mandar foto", tint = Cinema.accent)
             }
             Spacer(Modifier.width(8.dp))
             OutlinedTextField(
-                value = text, onValueChange = { text = it.take(500) },
+                value = text, onValueChange = {
+                    text = it.take(500)
+                    if (text.isBlank()) session.sendTyping(stopped = true) else session.sendTyping()
+                },
                 placeholder = { Text("Mensagem para a sala") },
                 shape = RoundedCornerShape(28.dp), maxLines = 3,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { session.sendChat(text); text = "" }),
                 colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedContainerColor = Color(0xFF241D19), focusedContainerColor = Color(0xFF2B231E),
+                    unfocusedContainerColor = Cinema.surface, focusedContainerColor = Cinema.surfaceHigh,
                     unfocusedBorderColor = Color.Transparent, focusedBorderColor = Cinema.accent.copy(alpha = 0.5f),
                 ),
                 modifier = Modifier.weight(1f),
@@ -479,7 +523,7 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
             IconButton(
                 onClick = { session.sendChat(text); text = "" },
                 enabled = text.isNotBlank(),
-                modifier = Modifier.size(48.dp).clip(CircleShape).background(if (text.isNotBlank()) Cinema.accent else Color(0xFF3A302A)),
+                modifier = Modifier.size(48.dp).clip(CircleShape).background(if (text.isNotBlank()) Cinema.accent else Cinema.outline),
             ) { Icon(Icons.AutoMirrored.Rounded.Send, "Enviar", tint = if (text.isNotBlank()) Cinema.onAccent else Cinema.muted) }
         }
     }
@@ -494,10 +538,10 @@ fun Avatar(p: Person, isHost: Boolean, isMe: Boolean) {
                     .then(if (isMe) Modifier.border(2.dp, Color.White.copy(alpha = 0.7f), CircleShape) else Modifier),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(p.name.trim().take(1).uppercase().ifBlank { "?" }, color = Color(0xFF1A1310), fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                Text(p.name.trim().take(1).uppercase().ifBlank { "?" }, color = Cinema.onAccent, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
             }
             if (isHost) Text("👑", fontSize = 15.sp, modifier = Modifier.align(Alignment.TopCenter).offset(y = (-12).dp))
-            Box(Modifier.align(Alignment.BottomEnd).size(14.dp).clip(CircleShape).background(Color(0xFF17120F)).padding(2.dp).clip(CircleShape).background(Color(0xFF5FD38D)))
+            Box(Modifier.align(Alignment.BottomEnd).size(14.dp).clip(CircleShape).background(Cinema.bgBottom).padding(2.dp).clip(CircleShape).background(Cinema.green))
         }
         Spacer(Modifier.height(4.dp))
         Text(if (isMe) "${p.name} (você)" else p.name, color = Cinema.text, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
@@ -510,7 +554,7 @@ private fun Bubble(m: ChatMessage, mine: Boolean, onPhoto: (androidx.compose.ui.
         Column(
             Modifier.widthIn(max = if (m.image != null) 240.dp else 280.dp)
                 .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp))
-                .background(if (mine) Cinema.accent else Color(0xFF2B231E))
+                .background(if (mine) Cinema.accent else Cinema.surfaceHigh)
                 .padding(if (m.image != null) 4.dp else 0.dp)
                 .padding(horizontal = if (m.image != null) 0.dp else 12.dp, vertical = if (m.image != null) 0.dp else 8.dp),
         ) {
@@ -523,6 +567,62 @@ private fun Bubble(m: ChatMessage, mine: Boolean, onPhoto: (androidx.compose.ui.
                 m.text, color = if (mine) Cinema.onAccent else Cinema.text, fontSize = 15.sp,
                 modifier = if (m.image != null) Modifier.padding(horizontal = 8.dp, vertical = 6.dp) else Modifier,
             )
+        }
+    }
+}
+
+/** Três pontinhos pulando (alguém digitando). */
+@Composable
+private fun TypingDots() {
+    val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "pontos")
+    val phase by t.animateFloat(
+        0f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.LinearEasing)), label = "f",
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+        for (i in 0 until 3) {
+            val lift = kotlin.math.sin(((phase - i * 0.18f) * 2 * Math.PI).toFloat()).coerceAtLeast(0f)
+            Box(Modifier.offset(y = (-4 * lift).dp).size(6.dp).clip(CircleShape).background(Cinema.accent.copy(alpha = 0.5f + 0.5f * lift)))
+        }
+    }
+}
+
+/**
+ * Emojis subindo por cima do filme. Cada reação nova (de qualquer um) aparece uma vez,
+ * nasce embaixo numa posição aleatória e sobe balançando até sumir.
+ */
+@Composable
+fun FloatingReactions(reactions: List<Reaction>, since: Long, serverNow: () -> Long) {
+    val shown = remember { mutableStateListOf<Pair<Reaction, Float>>() }
+    val seen = remember { mutableSetOf<String>() }
+    LaunchedEffect(reactions) {
+        val now = serverNow()
+        reactions.filter { it.id !in seen && it.at >= since && now - it.at < 8_000 }.forEach {
+            seen += it.id
+            shown += it to (0.15f + kotlin.random.Random.nextFloat() * 0.7f)
+        }
+        reactions.forEach { seen += it.id }
+    }
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        val h = maxHeight
+        val w = maxWidth
+        shown.toList().forEach { (r, x) ->
+            key(r.id) {
+                val anim = remember { androidx.compose.animation.core.Animatable(0f) }
+                LaunchedEffect(Unit) {
+                    anim.animateTo(1f, androidx.compose.animation.core.tween(2600, easing = androidx.compose.animation.core.LinearOutSlowInEasing))
+                    shown.removeAll { it.first.id == r.id }
+                }
+                val p = anim.value
+                val sway = kotlin.math.sin(p * 9f) * 14f
+                Column(
+                    Modifier.offset(x = w * x + sway.dp - 20.dp, y = h - (h * 0.85f * p) - 40.dp)
+                        .graphicsLayer { alpha = (1f - p * p).coerceIn(0f, 1f); val sc = 0.7f + 0.6f * kotlin.math.min(1f, p * 4); scaleX = sc; scaleY = sc },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(r.emoji, fontSize = 34.sp)
+                    Text(r.name, color = Color.White, fontSize = 10.sp, modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 5.dp))
+                }
+            }
         }
     }
 }

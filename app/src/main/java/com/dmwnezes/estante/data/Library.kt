@@ -88,8 +88,13 @@ class Library(private val file: File, private val clock: () -> Long = System::cu
         }
     }
 
-    fun savePosition(id: String, positionMs: Long, durationMs: Long) =
+    fun savePosition(id: String, positionMs: Long, durationMs: Long) {
         update(id) { Resume.record(it, positionMs, durationMs, clock()) }
+        // Série toda assistida: sai da pilha "para ver".
+        val boxId = current.video(id)?.boxId ?: return
+        val box = current.box(boxId) ?: return
+        if (box.toWatch && current.episodesOf(boxId).all { it.finished }) updateBox(boxId) { it.copy(toWatch = false) }
+    }
 
     /** Troca a capa, apagando o arquivo da anterior. */
     fun setCover(id: String, path: String?) {
@@ -133,6 +138,35 @@ class Library(private val file: File, private val clock: () -> Long = System::cu
             videos = s.videos.map { v -> newOrder[v.id]?.let { v.copy(order = it) } ?: v },
             boxes = s.boxes.map { b -> newOrder[b.id]?.let { b.copy(order = it) } ?: b },
         )
+    }
+
+    /** Estrela (prateleira de favoritos) — vale para DVD ou série. */
+    fun setFavorite(itemId: String, on: Boolean) = change { s ->
+        s.copy(
+            videos = s.videos.map { if (it.id == itemId) it.copy(favorite = on) else it },
+            boxes = s.boxes.map { if (it.id == itemId) it.copy(favorite = on) else it },
+        )
+    }
+
+    /** Pilha "para ver" — vale para DVD ou série. */
+    fun setToWatch(itemId: String, on: Boolean) = change { s ->
+        s.copy(
+            videos = s.videos.map { if (it.id == itemId) it.copy(toWatch = on) else it },
+            boxes = s.boxes.map { if (it.id == itemId) it.copy(toWatch = on) else it },
+        )
+    }
+
+    /** Velocidade lembrada: episódios guardam na série (vale para todos), filmes no próprio DVD. */
+    fun saveSpeed(videoId: String, speed: Float) {
+        val v = current.video(videoId) ?: return
+        val box = v.boxId?.let { current.box(it) }
+        if (box != null) { if (box.speed != speed) updateBox(box.id) { it.copy(speed = speed) } }
+        else if (v.speed != speed) update(videoId) { it.copy(speed = speed) }
+    }
+
+    fun speedFor(videoId: String): Float {
+        val v = current.video(videoId) ?: return 1f
+        return v.boxId?.let { current.box(it)?.speed } ?: v.speed
     }
 
     // ---------- séries ----------

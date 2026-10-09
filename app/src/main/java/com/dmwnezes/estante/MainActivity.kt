@@ -59,6 +59,15 @@ import com.dmwnezes.estante.update.Updater
 import kotlinx.coroutines.launch
 
 /** FragmentActivity porque a janela de escolher a TV (Chromecast) precisa. */
+/** Atalho pedido pelo ícone do app (segurar o ícone). */
+object Launch {
+    var shortcut by androidx.compose.runtime.mutableStateOf<String?>(null)
+
+    fun read(intent: android.content.Intent?) {
+        intent?.getStringExtra("abrir")?.let { shortcut = it }
+    }
+}
+
 class MainActivity : FragmentActivity() {
 
     private val pipListener = Consumer<PictureInPictureModeChangedInfo> { Pip.inPip = it.isInPictureInPictureMode }
@@ -73,8 +82,16 @@ class MainActivity : FragmentActivity() {
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         AppGraph.init(this)
         ShelfThemes.load()
+        com.dmwnezes.estante.ui.ShelfLight.load()
+        com.dmwnezes.estante.data.Resume.recapMs = if (AppGraph.prefs.getBoolean("recap", true)) 10_000 else 0
         addOnPictureInPictureModeChangedListener(pipListener)
+        if (savedInstanceState == null) Launch.read(intent)
         setContent { EstanteTheme { EstanteApp() } }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        Launch.read(intent)
     }
 
     override fun onDestroy() {
@@ -99,6 +116,8 @@ sealed interface Screen {
     data object Settings : Screen
     data class Player(val queue: List<String>, val start: Int, val fromStart: Boolean) : Screen
     data class Party(val videoId: String) : Screen
+    data object Diary : Screen
+    data class DiaryEntry(val id: String) : Screen
 }
 
 @Composable
@@ -109,7 +128,8 @@ fun EstanteApp() {
     val state by library.state.collectAsState()
     val prefs = AppGraph.prefs
 
-    var splash by rememberSaveable { mutableStateOf(true) }
+    // Vindo de um atalho, pula a abertura animada.
+    var splash by rememberSaveable { mutableStateOf(Launch.shortcut == null) }
     val stack = remember { mutableStateListOf<Screen>(Screen.Shelf) }
     val screen = stack.last()
     fun go(s: Screen) { stack += s }
@@ -174,6 +194,35 @@ fun EstanteApp() {
         onDispose { lifecycle.removeObserver(obs) }
     }
 
+    // Atalhos do ícone.
+    LaunchedEffect(Launch.shortcut, splash) {
+        val sc = Launch.shortcut ?: return@LaunchedEffect
+        if (splash) return@LaunchedEffect
+        Launch.shortcut = null
+        stack.clear(); stack += Screen.Shelf
+        val st = library.current
+        when (sc) {
+            "continuar" -> st.continueWatching.firstOrNull()?.let(::resume) ?: toast("Nada começado ainda. Escolha um DVD na estante.")
+            "sortear" -> {
+                // Prefere a pilha "para ver"; senão, algo não assistido; senão, qualquer um.
+                val items = st.shelfItems
+                val pick = items.filter { it.toWatch }.ifEmpty {
+                    items.filter { i -> when (i) { is ShelfItem.Single -> !i.video.finished; is ShelfItem.Series -> i.episodes.any { !it.finished } } }
+                }.ifEmpty { items }.randomOrNull()
+                when (pick) {
+                    null -> toast("A estante está vazia.")
+                    is ShelfItem.Single -> { toast("🎲 Sorteado: ${pick.title}"); openVideo = pick.id }
+                    is ShelfItem.Series -> { toast("🎲 Sorteado: ${pick.title}"); go(Screen.Series(pick.id)) }
+                }
+            }
+            "junto" -> {
+                val v = st.continueWatching.firstOrNull { it.source == com.dmwnezes.estante.data.Source.DRIVE }
+                    ?: st.videos.filter { it.source == com.dmwnezes.estante.data.Source.DRIVE }.maxByOrNull { it.watchedAt }
+                if (v != null) go(Screen.Party(v.id)) else toast("Abra um filme do Drive e toque em Assistir junto.")
+            }
+        }
+    }
+
     if (splash) {
         SplashCredits { splash = false }
         return
@@ -211,9 +260,14 @@ fun EstanteApp() {
                 onSettings = { go(Screen.Settings) },
                 updateAvailable = newerAvailable,
                 onMove = { id, shelf, before ->
-                    // Arrastar fixa a ordem atual como "minha ordem" e passa a usar ela.
-                    if (sort != SortOrder.MANUAL) { library.freezeOrder(sort); setSort(SortOrder.MANUAL) }
-                    library.move(id, shelf, before)
+                    if (shelf == com.dmwnezes.estante.ui.FAV_SHELF) {
+                        library.setFavorite(id, true)
+                        toast("★ Nos favoritos")
+                    } else {
+                        // Arrastar fixa a ordem atual como "minha ordem" e passa a usar ela.
+                        if (sort != SortOrder.MANUAL) { library.freezeOrder(sort); setSort(SortOrder.MANUAL) }
+                        library.move(id, shelf, before)
+                    }
                 },
                 theme = ShelfThemes.current,
             )
@@ -237,7 +291,9 @@ fun EstanteApp() {
                     onEditEpisode = { editVideo = it.id },
                 )
             }
-            Screen.Settings -> SettingsScreen(onBack = ::back, onCheckUpdate = { showUpdate = true }, updateAvailable = newerAvailable)
+            Screen.Settings -> SettingsScreen(onBack = ::back, onCheckUpdate = { showUpdate = true }, updateAvailable = newerAvailable, onDiary = { go(Screen.Diary) })
+            Screen.Diary -> com.dmwnezes.estante.party.DiaryScreen(onBack = ::back, onOpen = { go(Screen.DiaryEntry(it)) })
+            is Screen.DiaryEntry -> com.dmwnezes.estante.party.DiaryEntryScreen(s.id, onBack = ::back)
             is Screen.Party -> {
                 val v = state.video(s.videoId)
                 if (v == null) LaunchedEffect(Unit) { back() }
@@ -262,6 +318,7 @@ fun EstanteApp() {
             onRemove = { openVideo = null; library.remove(id) },
             onDismiss = { openVideo = null },
             onParty = { openVideo = null; go(Screen.Party(id)) },
+            onDiary = { entryId -> openVideo = null; go(Screen.DiaryEntry(entryId)) },
         )
     }
     editVideo?.let { id ->

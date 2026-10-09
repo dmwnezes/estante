@@ -30,6 +30,14 @@ data class ShelfTheme(
 }
 
 object ShelfThemes {
+    /** Padrão: as cores do Palavreiro, com tábua lilás. */
+    val night = ShelfTheme(
+        "noite", "Noite suave",
+        Color(0xFF2A2058), Color(0xFF120E2B),
+        Color(0xFF7468C4), Color(0xFF453B8A), Color(0xFF2A2260), Color(0x26000000),
+        Color(0xFF9B8CFF), Color(0xFF7A6BE0), Color(0xFF1A1438),
+        ShelfTheme.Style.WOOD,
+    )
     val darkWood = ShelfTheme(
         "escura", "Madeira escura",
         Color(0xFF2E211B), Color(0xFF130D0B),
@@ -59,15 +67,15 @@ object ShelfThemes {
         ShelfTheme.Style.RETRO,
     )
 
-    val all = listOf(darkWood, lightWood, metal, retro)
+    val all = listOf(night, darkWood, lightWood, metal, retro)
 
     /** Tema escolhido (fica salvo). */
-    var current by mutableStateOf(darkWood)
+    var current by mutableStateOf(night)
         private set
 
     fun load() {
         val k = runCatching { AppGraph.prefs.getString("shelfTheme", null) }.getOrNull()
-        current = all.firstOrNull { it.key == k } ?: darkWood
+        current = all.firstOrNull { it.key == k } ?: night
     }
 
     fun select(t: ShelfTheme) {
@@ -76,4 +84,35 @@ object ShelfThemes {
     }
 }
 
-val LocalShelfTheme = compositionLocalOf { ShelfThemes.darkWood }
+val LocalShelfTheme = compositionLocalOf { ShelfThemes.night }
+
+/** Luz de LED embaixo das tábuas: automática (acende das 18h às 6h), sempre ou nunca. */
+object ShelfLight {
+    enum class Mode(val label: String) { AUTO("Automática (à noite)"), ON("Sempre acesa"), OFF("Apagada") }
+
+    var mode by mutableStateOf(Mode.AUTO)
+        private set
+
+    fun load() {
+        mode = runCatching { Mode.valueOf(AppGraph.prefs.getString("shelfLight", "AUTO")!!) }.getOrDefault(Mode.AUTO)
+    }
+
+    fun select(m: Mode) {
+        mode = m
+        runCatching { AppGraph.prefs.edit().putString("shelfLight", m.name).apply() }
+    }
+
+    fun isNight(hour: Int) = hour >= 18 || hour < 6
+
+    fun lit(hour: Int = java.time.LocalTime.now().hour): Boolean = when (mode) {
+        Mode.ON -> true
+        Mode.OFF -> false
+        Mode.AUTO -> isNight(hour)
+    }
+
+    /** Cor quente do LED. */
+    val warm = Color(0xFFFFC46B)
+}
+
+/** Luz acesa nesta tela (vem de cima, para não calcular a hora em cada tábua). */
+val LocalShelfLit = compositionLocalOf { false }

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<meta name="theme-color" content="#17120F">
+<meta name="theme-color" content="#120E2B">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Estante · Sala</title>
@@ -12,11 +12,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;800&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #17120F; --card: #241D19; --card2: #2B231E; --line: #3A302A;
-    --text: #F7EEE6; --muted: #BFAE9F; --accent: #F0A94B; --on-accent: #2A1A0E; --red: #E5737A; --green: #5FD38D;
+    /* Paleta "Noite suave" (a mesma do app e do Palavreiro) */
+    --bg: #120E2B; --card: #231C48; --card2: #2F275C; --line: #4A4180;
+    --text: #F4F1FF; --muted: #A9A2D0; --accent: #9B8CFF; --on-accent: #1A1438; --red: #E5737A; --green: #5FB873; --yellow: #E6C14F;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: Outfit, system-ui, -apple-system, sans-serif; overscroll-behavior: none; }
+  html, body { margin: 0; height: 100%; background: linear-gradient(#2A2058, #120E2B) fixed, var(--bg); color: var(--text); font-family: Outfit, system-ui, -apple-system, sans-serif; overscroll-behavior: none; }
   body { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
   /* A sala ocupa só a parte visível da tela: com o teclado aberto ela encolhe (o player fica no lugar). */
   #room.on { position: fixed; left: 0; right: 0; top: var(--vv-top, 0px); height: var(--vv-h, 100dvh); }
@@ -26,10 +27,10 @@
   #join { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; text-align: center; gap: 14px; }
   .shelf { display: flex; gap: 8px; align-items: flex-end; height: 74px; }
   .shelf i { display: block; width: 34px; border-radius: 5px; box-shadow: 0 6px 14px rgba(0,0,0,.5); }
-  .shelf i:nth-child(1) { height: 60px; background: linear-gradient(#C8643F, #7a3c25); }
-  .shelf i:nth-child(2) { height: 72px; background: linear-gradient(#F0A94B, #9a6a2c); }
-  .shelf i:nth-child(3) { height: 60px; background: linear-gradient(#F4E6D4, #a89a88); transform: rotate(8deg); transform-origin: bottom; }
-  .plank { width: 170px; height: 14px; border-radius: 5px; background: linear-gradient(#B07C50 0 40%, #7E522F 40%, #4A2F1B); margin-top: -2px; box-shadow: 0 8px 14px rgba(0,0,0,.45); }
+  .shelf i:nth-child(1) { height: 60px; background: linear-gradient(#5FB873, #2f6b3c); }
+  .shelf i:nth-child(2) { height: 72px; background: linear-gradient(#E6C14F, #8a6f22); }
+  .shelf i:nth-child(3) { height: 60px; background: linear-gradient(#9B8CFF, #5546a8); transform: rotate(8deg); transform-origin: bottom; }
+  .plank { width: 170px; height: 14px; border-radius: 5px; background: linear-gradient(#7468C4 0 40%, #453B8A 40%, #2A2260); margin-top: -2px; box-shadow: 0 8px 14px rgba(0,0,0,.45); }
   h1 { margin: 10px 0 0; font-size: 30px; font-weight: 800; }
   .sub { color: var(--muted); font-size: 15px; max-width: 320px; line-height: 1.4; }
   .movie { color: var(--accent); font-weight: 600; }
@@ -59,7 +60,7 @@
   .people { display: flex; gap: 14px; overflow-x: auto; margin-top: 12px; padding-top: 10px; scrollbar-width: none; }
   .people::-webkit-scrollbar { display: none; }
   .person { width: 78px; flex: none; text-align: center; font-size: 11px; }
-  .av { position: relative; width: 50px; height: 50px; margin: 0 auto 4px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 20px; color: #1A1310; }
+  .av { position: relative; width: 50px; height: 50px; margin: 0 auto 4px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 20px; color: #1A1438; }
   .av.me { box-shadow: 0 0 0 2px rgba(255,255,255,.7); }
   .av .crown { position: absolute; top: -15px; left: 50%; transform: translateX(-50%); font-size: 15px; }
   .av .dot { position: absolute; right: -1px; bottom: -1px; width: 14px; height: 14px; border-radius: 50%; background: var(--green); border: 2px solid var(--card); }
@@ -68,7 +69,7 @@
   /* Teclado aberto: a faixa de quem está na sala vira uma linha só. */
   .mini { display: none; align-items: center; gap: 10px; margin: 6px 12px; padding: 6px 12px; border-radius: 999px; background: var(--card); flex: none; }
   .mini .dots { display: flex; }
-  .mini .dots span { width: 24px; height: 24px; border-radius: 50%; margin-right: -8px; border: 2px solid var(--card); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #1A1310; }
+  .mini .dots span { width: 24px; height: 24px; border-radius: 50%; margin-right: -8px; border: 2px solid var(--card); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #1A1438; }
   .mini .names { flex: 1; min-width: 0; margin-left: 8px; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mini .c { color: var(--accent); font-size: 12px; font-weight: 600; }
   body.kb .card { display: none; }
@@ -84,6 +85,27 @@
   .sys { text-align: center; color: var(--muted); font-size: 12px; padding: 2px 0; }
   .empty { text-align: center; color: var(--muted); opacity: .7; font-size: 13px; padding-top: 20px; }
 
+  /* Reações e "digitando…" */
+  .reacts { display: flex; justify-content: space-between; padding: 4px 12px 0; flex: none; }
+  .reacts button { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--card); font-size: 22px; line-height: 1; padding: 0; cursor: pointer; transition: transform .12s; }
+  .reacts button:active { transform: scale(1.25); }
+  body.kb .reacts { display: none; }
+  #typing { display: none; align-items: center; gap: 8px; padding: 2px 18px; color: var(--muted); font-size: 12px; flex: none; }
+  #typing.on { display: flex; }
+  .dots { display: flex; gap: 3px; }
+  .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: hop .9s infinite; }
+  .dots i:nth-child(2) { animation-delay: .15s; } .dots i:nth-child(3) { animation-delay: .3s; }
+  @keyframes hop { 0%, 60%, 100% { transform: none; opacity: .5 } 30% { transform: translateY(-4px); opacity: 1 } }
+  #floats { position: absolute; inset: 0; z-index: 3; pointer-events: none; overflow: hidden; }
+  .float { position: absolute; bottom: 30px; display: flex; flex-direction: column; align-items: center; animation: rise 2.6s cubic-bezier(.2,.6,.3,1) forwards; }
+  .float b { font-size: 34px; line-height: 1; }
+  .float span { margin-top: 2px; padding: 0 5px; border-radius: 6px; background: rgba(0,0,0,.45); color: #fff; font-size: 10px; }
+  @keyframes rise {
+    0% { transform: translate(0, 0) scale(.6); opacity: 0 }
+    12% { opacity: 1; transform: translate(6px, -12%) scale(1.15) }
+    50% { transform: translate(-10px, -55%) scale(1) }
+    100% { transform: translate(8px, -110%) scale(1); opacity: 0 }
+  }
   form { display: flex; gap: 8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); flex: none; }
   form input { flex: 1; max-width: none; border-radius: 28px; border-color: transparent; }
   form button, form .pic { width: 48px; height: 48px; flex: none; border-radius: 50%; border: 0; background: var(--line); color: var(--muted); display: flex; align-items: center; justify-content: center; }
@@ -127,6 +149,7 @@
   <div class="player">
     <video id="video" playsinline controls preload="metadata"></video>
     <div class="overlay" id="overlay"></div>
+    <div id="floats"></div>
   </div>
   <div class="side">
     <div class="card">
@@ -138,6 +161,8 @@
     </div>
     <div class="mini" id="mini"><div class="dots" id="miniDots"></div><div class="names" id="miniNames"></div><div class="c" id="miniCode"></div></div>
     <div id="chat"><div class="empty">O chat da sala aparece aqui.</div></div>
+    <div id="typing"><div class="dots"><i></i><i></i><i></i></div><span id="typingText"></span></div>
+    <div class="reacts" id="reacts"></div>
     <form id="form" autocomplete="off">
       <label class="pic" id="pic" aria-label="Mandar foto"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 5H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Zm0 12H5l3.5-4.5 2.5 3 3.5-4.5L19 17ZM8.5 10A1.5 1.5 0 1 0 8.5 7a1.5 1.5 0 0 0 0 3Z"/></svg><input type="file" id="file" accept="image/*"></label>
       <input type="text" id="text" placeholder="Mensagem para a sala" maxlength="500" enterkeyhint="send">
@@ -318,6 +343,47 @@
     if (atBottom || (lines.at(-1)?.m?.by === me)) box.scrollTop = box.scrollHeight;
   }
 
+  // ---------- Reações ----------
+  const REACTIONS = ["😂", "😱", "❤️", "👏", "😭", "🍿"];
+  const joinedAt = Date.now();
+  const seenReactions = new Set();
+  $("reacts").innerHTML = REACTIONS.map((e) => `<button type="button" aria-label="${e}">${e}</button>`).join("");
+  $("reacts").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+    if (joined) api("POST", "/reactions", { e: b.textContent, name: myName, by: me, at: SV }).catch(showConn);
+  }));
+  function renderReactions() {
+    const r = (tree && tree.reactions) || {};
+    for (const [id, x] of Object.entries(r)) {
+      if (seenReactions.has(id)) continue;
+      seenReactions.add(id);
+      if (!REACTIONS.includes(x.e) || !x.at || x.at < serverNow() - 8000 || x.at < joinedAt + offset - 5000) continue;
+      const el = document.createElement("div");
+      el.className = "float";
+      el.style.left = (12 + Math.random() * 70) + "%";
+      el.innerHTML = `<b>${x.e}</b><span>${esc(x.name || "?")}</span>`;
+      $("floats").appendChild(el);
+      setTimeout(() => el.remove(), 2700);
+    }
+  }
+
+  // ---------- Digitando ----------
+  let typingSent = 0;
+  function sendTyping(stopped) {
+    if (!joined) return;
+    if (stopped) { if (typingSent) { typingSent = 0; api("DELETE", `/typing/${me}`).catch(() => {}); } return; }
+    if (Date.now() - typingSent < 2500) return;
+    typingSent = Date.now();
+    api("PUT", `/typing/${me}`, { name: myName, at: SV }).catch(() => {});
+  }
+  function renderTyping() {
+    const t = (tree && tree.typing) || {};
+    const names = Object.entries(t).filter(([id, x]) => id !== me && x && serverNow() - (x.at || 0) < 4000 && serverNow() - (x.at || 0) > -2000).map(([, x]) => x.name || "Alguém");
+    const label = names.length === 0 ? "" : names.length === 1 ? `${names[0]} está digitando…` : `${names.slice(0, -1).join(", ")} e ${names.at(-1)} estão digitando…`;
+    $("typingText").textContent = label;
+    $("typing").classList.toggle("on", !!label);
+  }
+  setInterval(() => { if (joined) renderTyping(); }, 1000);
+
   // ---------- Fotos ----------
   function openViewer(src) { $("viewerImg").src = src; $("viewer").classList.add("show"); }
   $("viewerClose").addEventListener("click", () => $("viewer").classList.remove("show"));
@@ -355,12 +421,14 @@
   // O botão de enviar não "rouba" o foco: o teclado continua aberto depois de mandar.
   $("send").addEventListener("mousedown", (e) => e.preventDefault());
   $("send").addEventListener("pointerdown", (e) => e.preventDefault());
+  textInput.addEventListener("input", () => sendTyping(!textInput.value.trim()));
   textInput.addEventListener("input", () => $("send").classList.toggle("on", !!textInput.value.trim()));
   $("form").addEventListener("submit", (e) => {
     e.preventDefault();
     const t = textInput.value.trim();
     if (!t) return;
     textInput.value = ""; $("send").classList.remove("on");
+    sendTyping(true);
     textInput.focus();
     api("POST", "/chat", { name: myName, text: t.slice(0, 500), at: SV, by: me }).catch(showConn);
     $("chat").scrollTop = $("chat").scrollHeight;
@@ -390,6 +458,8 @@
       if (key !== lastRemoteKey) { lastRemoteKey = key; applyRemote(s); }
     }
     renderPeople();
+    renderReactions();
+    renderTyping();
   }
 
   const es = new EventSource(`${ROOT}.json`);
@@ -453,6 +523,7 @@
     $("miniCode").textContent = code;
     fit();
     joined = true;
+    Object.keys((tree && tree.reactions) || {}).forEach((id) => seenReactions.add(id));
     await heartbeat();
     setInterval(heartbeat, 10000);
     loadSubtitle(v);
@@ -461,7 +532,7 @@
     renderPeople();
   });
 
-  addEventListener("pagehide", () => { if (joined) api("DELETE", `/people/${me}`).catch(() => {}); });
+  addEventListener("pagehide", () => { if (joined) { api("DELETE", `/people/${me}`).catch(() => {}); api("DELETE", `/typing/${me}`).catch(() => {}); } });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && joined) { heartbeat(); if (lastState) applyRemote(lastState); } });
 })();
 </script>

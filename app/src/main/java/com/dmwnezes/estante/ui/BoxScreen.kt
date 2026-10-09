@@ -33,6 +33,9 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.MoreVert
@@ -147,6 +150,19 @@ fun BoxScreen(
                 Column(Modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
                     PillButton(label, Icons.Rounded.PlayArrow, { onPlay(episodes, next, false) }, Modifier.fillMaxWidth())
                     Text(e.title, color = Cinema.muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                }
+            }
+            item {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ToggleChip(
+                        if (box.favorite) "Favorito" else "Favoritar",
+                        if (box.favorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                        box.favorite, Cinema.yellow, Modifier.weight(1f),
+                    ) { AppGraph.library.setFavorite(box.id, !box.favorite) }
+                    ToggleChip(
+                        if (box.toWatch) "Na pilha" else "Pôr na pilha",
+                        Icons.Rounded.Layers, box.toWatch, Cinema.accent, Modifier.weight(1f),
+                    ) { AppGraph.library.setToWatch(box.id, !box.toWatch) }
                 }
             }
             if (sync != null) item {

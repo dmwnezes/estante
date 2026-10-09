@@ -13,6 +13,10 @@ App Android que transforma seus vídeos do Google Drive (e do celular) numa esta
 - **Listas de reprodução:** junte vídeos para tocar em sequência.
 - **Player:** tela cheia, legendas .srt/.vtt (achadas na pasta do Drive ou escolhidas no celular, com acentos corrigidos), gestos (brilho à esquerda, volume à direita, toque duplo para ±10 s), janelinha flutuante e envio para a TV (Chromecast / Google TV).
 - **Assistir junto:** abra uma sala a partir de um filme do Drive e mande o link. Quem abrir (até no iPhone, pelo site) assiste ao mesmo tempo, com play/pause valendo para todos, lista de quem está na sala e chat.
+- **Favoritos e pilha "para ver":** prateleira dourada no topo com os DVDs de estrela (ou arraste um DVD até ela) e uma pilha de DVDs deitados com o que você quer assistir — sai da pilha sozinho quando termina.
+- **Luz de LED:** fita de luz quente nas tábuas, acesa à noite (ou sempre / nunca, em Ajustes).
+- **Player:** velocidade lembrada por vídeo (e por série), pinça para preencher a tela, miniaturas ao arrastar a barra e "continuar" voltando 10 s para lembrar a cena.
+- **Atalhos no ícone:** segure o ícone para Continuar, Sortear ou Assistir junto.
 - **Atualização dentro do app:** Ajustes > Buscar atualização.
 
 ## Instalar no celular

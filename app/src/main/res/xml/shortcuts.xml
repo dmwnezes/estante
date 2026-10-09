@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="continuar"
+        android:enabled="true"
+        android:icon="@drawable/sc_continuar"
+        android:shortcutShortLabel="@string/sc_continuar">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.dmwnezes.estante"
+            android:targetClass="com.dmwnezes.estante.MainActivity">
+            <extra android:name="abrir" android:value="continuar" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="sortear"
+        android:enabled="true"
+        android:icon="@drawable/sc_sortear"
+        android:shortcutShortLabel="@string/sc_sortear">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.dmwnezes.estante"
+            android:targetClass="com.dmwnezes.estante.MainActivity">
+            <extra android:name="abrir" android:value="sortear" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="junto"
+        android:enabled="true"
+        android:icon="@drawable/sc_junto"
+        android:shortcutShortLabel="@string/sc_junto">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.dmwnezes.estante"
+            android:targetClass="com.dmwnezes.estante.MainActivity">
+            <extra android:name="abrir" android:value="junto" />
+        </intent>
+    </shortcut>
+</shortcuts>

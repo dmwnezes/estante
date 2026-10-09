@@ -40,8 +40,13 @@ data class Video(
     val season: Int = 0,
     val episode: Int = 0,
     val subtitle: String? = null,
+    val favorite: Boolean = false,
+    val toWatch: Boolean = false,
+    /** Velocidade lembrada (1.0 = normal). */
+    val speed: Float = 1f,
 ) {
     fun toJson(): JSONObject = JSONObject()
+        .put("favorite", favorite).put("toWatch", toWatch).put("speed", speed.toDouble())
         .put("id", id).put("source", source.name).put("ref", ref).put("title", title)
         .put("cover", cover ?: JSONObject.NULL).put("shelf", shelf)
         .put("positionMs", positionMs).put("durationMs", durationMs).put("finished", finished)
@@ -86,6 +91,9 @@ data class Video(
             season = o.optInt("season"),
             episode = o.optInt("episode"),
             subtitle = o.str("subtitle"),
+            favorite = o.optBoolean("favorite"),
+            toWatch = o.optBoolean("toWatch"),
+            speed = o.optDouble("speed", 1.0).toFloat().takeIf { it in 0.25f..4f } ?: 1f,
         )
     }
 }
@@ -105,8 +113,12 @@ data class Box(
     val year: String? = null,
     val genres: List<String> = emptyList(),
     val folderId: String? = null,
+    val favorite: Boolean = false,
+    val toWatch: Boolean = false,
+    val speed: Float = 1f,
 ) {
     fun toJson(): JSONObject = JSONObject()
+        .put("favorite", favorite).put("toWatch", toWatch).put("speed", speed.toDouble())
         .put("id", id).put("title", title).put("cover", cover ?: JSONObject.NULL).put("shelf", shelf)
         .put("addedAt", addedAt).put("order", order)
         .put("synopsis", synopsis ?: JSONObject.NULL).put("year", year ?: JSONObject.NULL)
@@ -124,6 +136,9 @@ data class Box(
             year = o.str("year"),
             genres = o.strList("genres"),
             folderId = o.str("folderId"),
+            favorite = o.optBoolean("favorite"),
+            toWatch = o.optBoolean("toWatch"),
+            speed = o.optDouble("speed", 1.0).toFloat().takeIf { it in 0.25f..4f } ?: 1f,
         )
     }
 }
@@ -180,8 +195,12 @@ sealed interface ShelfItem {
     val order: Double
     val addedAt: Long
     val watchedAt: Long
+    val favorite: Boolean
+    val toWatch: Boolean
 
     data class Single(val video: Video) : ShelfItem {
+        override val favorite get() = video.favorite
+        override val toWatch get() = video.toWatch
         override val id get() = video.id
         override val title get() = video.title
         override val shelf get() = video.shelf
@@ -191,6 +210,8 @@ sealed interface ShelfItem {
     }
 
     data class Series(val box: Box, val episodes: List<Video>) : ShelfItem {
+        override val favorite get() = box.favorite
+        override val toWatch get() = box.toWatch
         override val id get() = box.id
         override val title get() = box.title
         override val shelf get() = box.shelf
@@ -282,12 +303,18 @@ object Resume {
     /** Onde o vídeo deve começar ao tocar em "Continuar". */
     fun startAt(v: Video): Long = if (!v.finished && v.positionMs >= MIN_MS) v.positionMs else 0L
 
+    /** Quantos ms voltar ao continuar (para lembrar a cena). 0 desliga. */
+    @Volatile var recapMs: Long = 10_000
+
+    /** Onde o player começa ao tocar em "Continuar": um pouco antes de onde parou. */
+    fun resumeFrom(v: Video): Long = startAt(v).let { if (it > 0) (it - recapMs).coerceAtLeast(0) else 0 }
+
     /** Atualiza o vídeo com a posição atual do player. */
     fun record(v: Video, positionMs: Long, durationMs: Long, now: Long): Video {
         val dur = if (durationMs > 0) durationMs else v.durationMs
         return when {
             dur > 0 && positionMs >= dur * END_FRACTION ->
-                v.copy(positionMs = 0, durationMs = dur, finished = true, watchedAt = now)
+                v.copy(positionMs = 0, durationMs = dur, finished = true, watchedAt = now, toWatch = false)
             positionMs < MIN_MS -> v.copy(positionMs = 0, durationMs = dur, watchedAt = now)
             else -> v.copy(positionMs = positionMs, durationMs = dur, finished = false, watchedAt = now)
         }

@@ -15,6 +15,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -156,6 +159,10 @@ fun PlayerScreen(queue: List<Video>, startIndex: Int, fromStart: Boolean, onExit
     var preparing by remember { mutableStateOf(true) }
     var casting by remember { mutableStateOf(false) }
     var playerView by remember { mutableStateOf<PlayerView?>(null) }
+    var fill by remember { mutableStateOf(AppGraph.prefs.getBoolean("fillScreen", false)) }
+    var currentId by remember { mutableStateOf(queue.getOrNull(start)?.id) }
+    /** Arrastando a barra de tempo: fração (0–1), posição em ms e x na tela. */
+    var scrub by remember { mutableStateOf<Triple<Float, Long, Float>?>(null) }
     val inPip = Pip.inPip
 
     val exo = remember {
@@ -198,8 +205,9 @@ fun PlayerScreen(queue: List<Video>, startIndex: Int, fromStart: Boolean, onExit
         val first = queue.getOrNull(start)
         val firstSub = first?.let { Subtitles.prepare(context, it) }
         val items = queue.mapIndexed { i, v -> localItem(v, if (i == start) firstSub else null) }
-        val startMs = if (first == null || fromStart) 0L else Resume.startAt(library.current.video(first.id) ?: first)
+        val startMs = if (first == null || fromStart) 0L else Resume.resumeFrom(library.current.video(first.id) ?: first)
         exo.setMediaItems(items, start, startMs)
+        first?.let { exo.setPlaybackSpeed(library.speedFor(it.id)) }
         exo.prepare()
         exo.playWhenReady = true
         preparing = false
@@ -280,12 +288,14 @@ fun PlayerScreen(queue: List<Video>, startIndex: Int, fromStart: Boolean, onExit
                     }
                 }
                 lastId = mediaItem?.mediaId
+                mediaItem?.mediaId?.let { id -> active.setPlaybackSpeed(library.speedFor(id)) }
+                currentId = mediaItem?.mediaId
                 updateTitles()
                 error = null
                 // Ao passar para o próximo da lista, continua de onde tinha parado nele.
                 if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
                     val v = mediaItem?.mediaId?.let { library.current.video(it) }
-                    val at = v?.let(Resume::startAt) ?: 0L
+                    val at = v?.let(Resume::resumeFrom) ?: 0L
                     if (at > 0 && active.currentPosition < 1000) active.seekTo(at)
                 }
             }
@@ -301,6 +311,11 @@ fun PlayerScreen(queue: List<Video>, startIndex: Int, fromStart: Boolean, onExit
                 lastPos = p.currentPosition
                 if (p.duration > 0) lastDur = p.duration
                 if (lastId == null) lastId = p.currentMediaItem?.mediaId
+            }
+
+            override fun onPlaybackParametersChanged(params: androidx.media3.common.PlaybackParameters) {
+                // Velocidade escolhida fica lembrada para este vídeo (ou para a série toda).
+                active.currentMediaItem?.mediaId?.let { library.saveSpeed(it, params.speed) }
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -354,6 +369,15 @@ fun PlayerScreen(queue: List<Video>, startIndex: Int, fromStart: Boolean, onExit
         if (!preparing && castPlayer?.isCastSessionAvailable == true) switchToCast()
     }
 
+    // Miniaturas do vídeo que está tocando agora.
+    val thumbs = remember(currentId) { currentId?.let { id -> library.current.video(id)?.let { SeekThumbs(context, it) } } }
+    LaunchedEffect(thumbs) {
+        val t = thumbs ?: return@LaunchedEffect
+        var dur = 0L
+        while (dur <= 0) { dur = exo.duration.takeIf { it > 0 } ?: t.video.durationMs; if (dur <= 0) delay(1000) }
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { t.run(dur) }
+    }
+
     // Salva a cada 5 s enquanto toca (se o celular desligar de repente, perde no máximo isso).
     LaunchedEffect(exo) {
         while (true) {
@@ -385,7 +409,7 @@ fun PlayerScreen(queue: List<Video>, startIndex: Int, fromStart: Boolean, onExit
                 PlayerView(ctx).apply {
                     layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                     this.player = active
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    resizeMode = if (fill) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
                     setShowNextButton(queue.size > 1)
                     setShowPreviousButton(queue.size > 1)
                     setShowSubtitleButton(true)
@@ -395,6 +419,21 @@ fun PlayerScreen(queue: List<Video>, startIndex: Int, fromStart: Boolean, onExit
                         controlsVisible = vis == android.view.View.VISIBLE
                     })
                     playerView = this
+                    // Miniaturas: acompanha a barra de tempo enquanto ela é arrastada.
+                    (findViewById<android.view.View>(androidx.media3.ui.R.id.exo_progress) as? androidx.media3.ui.DefaultTimeBar)?.let { bar ->
+                        fun report(pos: Long) {
+                            val dur = active.duration.takeIf { it > 0 } ?: return
+                            val loc = IntArray(2); bar.getLocationInWindow(loc)
+                            val f = (pos.toFloat() / dur).coerceIn(0f, 1f)
+                            val pad = bar.paddingLeft + 12 * resources.displayMetrics.density
+                            scrub = Triple(f, pos, loc[0] + pad + (bar.width - 2 * pad) * f)
+                        }
+                        bar.addListener(object : androidx.media3.ui.TimeBar.OnScrubListener {
+                            override fun onScrubStart(timeBar: androidx.media3.ui.TimeBar, position: Long) = report(position)
+                            override fun onScrubMove(timeBar: androidx.media3.ui.TimeBar, position: Long) = report(position)
+                            override fun onScrubStop(timeBar: androidx.media3.ui.TimeBar, position: Long, canceled: Boolean) { scrub = null }
+                        })
+                    }
                 }
             },
         )
@@ -406,14 +445,23 @@ fun PlayerScreen(queue: List<Video>, startIndex: Int, fromStart: Boolean, onExit
                 activity = activity,
                 onTap = { playerView?.showController() },
                 onSeek = { fwd -> if (fwd) active.seekForward() else active.seekBack() },
+                fill = fill,
+                onFill = { f ->
+                    fill = f
+                    AppGraph.prefs.edit().putBoolean("fillScreen", f).apply()
+                    playerView?.resizeMode = if (f) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+                },
             )
+
+            // Prévia da cena ao arrastar a barra.
+            scrub?.let { (f, pos, x) -> SeekPreview(thumbs, f, pos, x) }
 
             if (casting) {
                 Column(
                     Modifier.align(Alignment.Center).padding(bottom = 80.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Icon(Icons.Rounded.Cast, null, tint = Color(0xFFF0A94B), modifier = Modifier.size(56.dp))
+                    Icon(Icons.Rounded.Cast, null, tint = Color(0xFF9B8CFF), modifier = Modifier.size(56.dp))
                     Spacer(Modifier.height(8.dp))
                     Text("Tocando na TV", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                     Text("Use os controles abaixo para pausar e avançar.", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
@@ -450,7 +498,7 @@ fun PlayerScreen(queue: List<Video>, startIndex: Int, fromStart: Boolean, onExit
                 }
             }
 
-            if (preparing) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color(0xFFF0A94B))
+            if (preparing) CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color(0xFF9B8CFF))
 
             error?.let { msg ->
                 Column(
@@ -468,4 +516,35 @@ fun PlayerScreen(queue: List<Video>, startIndex: Int, fromStart: Boolean, onExit
             }
         }
     }
+}
+
+/** Quadrinho acima da barra com a cena e o tempo do ponto arrastado. */
+@Composable
+private fun SeekPreview(thumbs: SeekThumbs?, fraction: Float, positionMs: Long, xPx: Float) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val v = thumbs?.version // lê para atualizar quando chegar quadro novo
+    val img = thumbs?.frame(fraction)
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        val w = 168.dp
+        val xDp = with(density) { xPx.toDp() } - w / 2
+        val clamped = xDp.coerceIn(8.dp, maxWidth - w - 8.dp)
+        Column(
+            Modifier.align(Alignment.BottomStart).padding(bottom = 92.dp).offset(x = clamped).width(w),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (img != null) {
+                androidx.compose.foundation.Image(
+                    img, null, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.width(w).height(w * 9 / 16).clip(RoundedCornerShape(10.dp))
+                        .border(2.dp, Color.White.copy(alpha = 0.85f), RoundedCornerShape(10.dp)),
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+            Text(
+                com.dmwnezes.estante.data.formatTime(positionMs), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.65f)).padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
+    }
+    @Suppress("UNUSED_EXPRESSION") v
 }

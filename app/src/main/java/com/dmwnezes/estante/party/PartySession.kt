@@ -51,6 +51,15 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
     /** Último comando de OUTRA pessoa (os meus não voltam para mim). */
     private val _remote = MutableStateFlow<PlayState?>(null)
     val remote: StateFlow<PlayState?> = _remote.asStateFlow()
+    private val _typing = MutableStateFlow<Map<String, Pair<String, Long>>>(emptyMap())
+    /** Quem avisou que está digitando: id → (nome, quando). */
+    val typing: StateFlow<Map<String, Pair<String, Long>>> = _typing.asStateFlow()
+    private val _reactions = MutableStateFlow<List<Reaction>>(emptyList())
+    val reactions: StateFlow<List<Reaction>> = _reactions.asStateFlow()
+    /** Nomes de todo mundo que passou pela sala (para o diário). */
+    val everyone = java.util.concurrent.ConcurrentHashMap<String, String>()
+    val startedAt = System.currentTimeMillis()
+    private var lastTypingSent = 0L
     private val _host = MutableStateFlow<String?>(null)
     val host: StateFlow<String?> = _host.asStateFlow()
     private val _connected = MutableStateFlow(false)
@@ -101,6 +110,15 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
                 p.optJSONObject(id)?.let { Person(id, it.optString("name", "?"), it.optLong("lastSeen"), it.optString("platform")) }
             }.sortedBy { it.name.lowercase() }.toList()
         }
+        _people.value.forEach { everyone[it.id] = it.name }
+        _typing.value = t.optJSONObject("typing")?.let { ty ->
+            ty.keys().asSequence().filter { it != me }.mapNotNull { id -> ty.optJSONObject(id)?.let { id to (it.optString("name", "?") to it.optLong("at")) } }.toMap()
+        } ?: emptyMap()
+        t.optJSONObject("reactions")?.let { r ->
+            _reactions.value = r.keys().asSequence().mapNotNull { id ->
+                r.optJSONObject(id)?.let { Reaction(id, it.optString("e"), it.optString("name", "?"), it.optLong("at"), it.optString("by")) }
+            }.filter { it.emoji in REACTIONS }.sortedBy { it.at }.toList().takeLast(40)
+        }
         t.optJSONObject("chat")?.let { c ->
             _messages.value = c.keys().asSequence().mapNotNull { id ->
                 c.optJSONObject(id)?.let {
@@ -124,8 +142,30 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
     fun sendChat(text: String) {
         val t = text.trim().take(500)
         if (t.isEmpty()) return
+        sendTyping(stopped = true)
         scope.launch {
             runCatching { db.push("$root/chat", JSONObject().put("name", myName).put("text", t).put("at", SERVER_TIME).put("by", me)) }
+                .onFailure { _error.value = it.message }
+        }
+    }
+
+    /** Avisa que está digitando (no máximo a cada 2,5 s). [stopped] apaga o aviso. */
+    fun sendTyping(stopped: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!stopped && now - lastTypingSent < 2_500) return
+        lastTypingSent = if (stopped) 0 else now
+        scope.launch {
+            runCatching {
+                if (stopped) db.delete("$root/typing/$me")
+                else db.put("$root/typing/$me", JSONObject().put("name", myName).put("at", SERVER_TIME))
+            }
+        }
+    }
+
+    fun sendReaction(emoji: String) {
+        if (emoji !in REACTIONS) return
+        scope.launch {
+            runCatching { db.push("$root/reactions", JSONObject().put("e", emoji).put("name", myName).put("by", me).put("at", SERVER_TIME)) }
                 .onFailure { _error.value = it.message }
         }
     }
@@ -145,6 +185,7 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
         jobs.forEach { it.cancel() }
         CoroutineScope(Dispatchers.IO).launch {
             runCatching { db.delete("$root/people/$me") }
+            runCatching { db.delete("$root/typing/$me") }
             scope.cancel()
         }
     }

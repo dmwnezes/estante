@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Estante</string>
+    <string name="sc_continuar">Continuar</string>
+    <string name="sc_sortear">Sortear</string>
+    <string name="sc_junto">Assistir junto</string>
 </resources>

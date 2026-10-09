@@ -5,6 +5,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -144,7 +146,7 @@ fun BoxCase(
                 Modifier.matchParentSize()
                     .offset(x = (i * 4).dp, y = (-i * 3).dp)
                     .clip(Shapes.case)
-                    .background(Brush.horizontalGradient(listOf(Color(0xFF221C19), Color(0xFF3A302A))))
+                    .background(Brush.horizontalGradient(listOf(Color(0xFF221C19), Color(0xFF3A3363))))
                     .border(1.dp, Color.White.copy(alpha = 0.08f), Shapes.case)
             )
         }
@@ -189,7 +191,7 @@ private fun BoxScope.ProgressBar(p: Float) {
 @Composable
 private fun BoxScope.WatchedBadge() {
     Box(
-        Modifier.align(Alignment.TopEnd).padding(6.dp).size(20.dp).clip(CircleShape).background(Cinema.accent),
+        Modifier.align(Alignment.TopEnd).padding(6.dp).size(20.dp).clip(CircleShape).background(Cinema.green),
         contentAlignment = Alignment.Center,
     ) {
         Icon(Icons.Rounded.Check, "Assistido", tint = Cinema.onAccent, modifier = Modifier.size(14.dp))
@@ -338,10 +340,22 @@ fun Disc(coverPath: String?, title: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** Tábua da estante, no tema escolhido (madeira, metal ou locadora). */
+/** Tábua dourada da prateleira de favoritos. */
+val GoldTheme = ShelfTheme(
+    "ouro", "Ouro", Color.Unspecified, Color.Unspecified,
+    Color(0xFFF3D77A), Color(0xFFC9A23A), Color(0xFF8A6A1C), Color(0x22FFFFFF),
+    Color(0xFFF3D77A), Color(0xFFC9A23A), Color(0xFF2A1F05),
+    ShelfTheme.Style.WOOD,
+)
+
+/**
+ * Tábua da estante, no tema escolhido (madeira, metal ou locadora).
+ * Com a luz acesa, uma fita de LED quente brilha na beira da frente.
+ */
 @Composable
-fun Plank(modifier: Modifier = Modifier) {
-    val t = LocalShelfTheme.current
+fun Plank(modifier: Modifier = Modifier, theme: ShelfTheme? = null) {
+    val t = theme ?: LocalShelfTheme.current
+    val lit = LocalShelfLit.current
     Canvas(modifier.fillMaxWidth().height(24.dp)) {
         val top = 7.dp.toPx()
         val front = 11.dp.toPx()
@@ -355,30 +369,93 @@ fun Plank(modifier: Modifier = Modifier) {
             topLeft = Offset(0f, top - 2), size = Size(size.width, front + 2), cornerRadius = r,
         )
         when (t.style) {
-            com.dmwnezes.estante.ui.ShelfTheme.Style.WOOD -> for (i in 0 until 3) {
+            ShelfTheme.Style.WOOD -> for (i in 0 until 3) {
                 val y = top + front * (0.3f + i * 0.22f)
                 drawLine(t.grain, Offset(size.width * (0.05f + i * 0.1f), y), Offset(size.width * (0.6f + i * 0.12f), y + 1), strokeWidth = 1.2f)
             }
-            com.dmwnezes.estante.ui.ShelfTheme.Style.METAL -> {
+            ShelfTheme.Style.METAL -> {
                 drawLine(t.grain, Offset(0f, top + front * 0.35f), Offset(size.width, top + front * 0.35f), strokeWidth = 1f)
                 for (x in listOf(0.03f, 0.97f, 0.5f)) drawCircle(Color.White.copy(alpha = 0.35f), 1.8.dp.toPx(), Offset(size.width * x, top + front * 0.55f))
             }
-            com.dmwnezes.estante.ui.ShelfTheme.Style.RETRO -> {
-                drawRect(t.plankTop, Offset(0f, top + front * 0.55f), Size(size.width, front * 0.18f))
-            }
+            ShelfTheme.Style.RETRO -> drawRect(t.plankTop, Offset(0f, top + front * 0.55f), Size(size.width, front * 0.18f))
         }
         drawRoundRect(
             Brush.verticalGradient(listOf(t.plankTop.copy(alpha = 0.85f), t.plankTop), startY = 0f, endY = top),
             topLeft = Offset(0f, 0f), size = Size(size.width, top), cornerRadius = r,
         )
         drawLine(Color.White.copy(alpha = 0.18f), Offset(r.x, 1f), Offset(size.width - r.x, 1f), strokeWidth = 1.5f)
+        if (lit) {
+            // Fita de LED na beira da frente + brilho para baixo.
+            val y = top + front - 1.5.dp.toPx()
+            drawRect(
+                Brush.verticalGradient(listOf(ShelfLight.warm.copy(alpha = 0.55f), Color.Transparent), startY = y, endY = size.height + 6.dp.toPx()),
+                topLeft = Offset(4.dp.toPx(), y), size = Size(size.width - 8.dp.toPx(), size.height - y),
+            )
+            drawLine(ShelfLight.warm, Offset(6.dp.toPx(), y), Offset(size.width - 6.dp.toPx(), y), strokeWidth = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+            drawLine(Color.White.copy(alpha = 0.8f), Offset(10.dp.toPx(), y), Offset(size.width - 10.dp.toPx(), y), strokeWidth = 0.8.dp.toPx())
+        }
+    }
+}
+
+/**
+ * Brilho quente na parede atrás dos DVDs (a luz da tábua de cima iluminando a fileira).
+ * Vai atrás do conteúdo da fileira; some de dia.
+ */
+fun Modifier.shelfGlow(lit: Boolean): Modifier = if (!lit) this else this.drawBehind {
+    drawRect(
+        Brush.verticalGradient(
+            0f to Color.Transparent,
+            0.1f to ShelfLight.warm.copy(alpha = 0.13f),
+            0.5f to ShelfLight.warm.copy(alpha = 0.05f),
+            1f to Color.Transparent,
+        ),
+    )
+    // Pontos de luz mais fortes, como se viessem de spots.
+    for (x in listOf(0.2f, 0.5f, 0.8f)) {
+        drawCircle(
+            Brush.radialGradient(listOf(ShelfLight.warm.copy(alpha = 0.10f), Color.Transparent), center = Offset(size.width * x, 0f), radius = size.width * 0.28f),
+            radius = size.width * 0.28f, center = Offset(size.width * x, 0f),
+        )
+    }
+}
+
+/**
+ * Caixa deitada (vista pela lombada), para a pilha "para ver".
+ * A lombada mostra o título e uma faixa com a cor da capa.
+ */
+@Composable
+fun LyingCase(title: String, coverPath: String?, isSeries: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit = {}) {
+    val h = title.fold(17) { acc, c -> acc * 131 + c.code }
+    val hue = Cinema.coverHues[Math.floorMod(h xor (h ushr 13), Cinema.coverHues.size)]
+    Box(
+        modifier.height(if (isSeries) 30.dp else 22.dp)
+            .shadow(6.dp, RoundedCornerShape(4.dp), ambientColor = Color.Black, spotColor = Color.Black)
+            .clip(RoundedCornerShape(4.dp))
+            .background(Brush.verticalGradient(listOf(Color(0xFF2B2624), Color(0xFF0B0909))))
+            .clickable(onClick = onClick),
+    ) {
+        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+            // Pontinha da capa aparecendo (imagem ou cor).
+            Box(Modifier.width(18.dp).fillMaxHeight().background(hue)) {
+                if (coverPath != null && File(coverPath).exists()) {
+                    AsyncImage(File(coverPath), null, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                title.uppercase(), color = Color.White.copy(alpha = 0.88f), fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.6.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+            )
+            if (isSeries) Text("BOX", color = Cinema.yellow, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(end = 8.dp))
+        }
+        Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.14f), Color.Transparent, Color.White.copy(alpha = 0.04f)))))
     }
 }
 
 /** Plaquinha com o nome da prateleira. */
 @Composable
-fun ShelfLabel(text: String, count: Int, modifier: Modifier = Modifier) {
-    val t = LocalShelfTheme.current
+fun ShelfLabel(text: String, count: Int, modifier: Modifier = Modifier, theme: ShelfTheme? = null) {
+    val t = theme ?: LocalShelfTheme.current
     Row(modifier.padding(horizontal = 18.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(
             Modifier.clip(RoundedCornerShape(10.dp))
