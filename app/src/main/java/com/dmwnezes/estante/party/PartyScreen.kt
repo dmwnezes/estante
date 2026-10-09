@@ -5,7 +5,7 @@ import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
-import androidx.annotation.OptIn
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
