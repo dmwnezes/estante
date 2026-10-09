@@ -63,4 +63,11 @@ class PartyTest {
         assertFalse(PartySync.iphoneFriendly("Filme.mkv", null))
         assertTrue(PartySync.iphoneFriendly(null, "video/mp4"))
     }
+
+    @Test fun `so aceita foto de verdade no chat`() {
+        assertTrue(com.dmwnezes.estante.party.ChatImages.isValid("data:image/jpeg;base64,/9j/4AAQ"))
+        assertFalse(com.dmwnezes.estante.party.ChatImages.isValid("javascript:alert(1)"))
+        assertFalse(com.dmwnezes.estante.party.ChatImages.isValid("https://exemplo.com/a.jpg"))
+        assertFalse(com.dmwnezes.estante.party.ChatImages.isValid(null))
+    }
 }

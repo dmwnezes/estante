@@ -107,7 +107,8 @@ class PartyDb(baseUrl: String, private val http: OkHttpClient) {
             val parts = path.split('/').filter { it.isNotEmpty() }
             val v = if (value == JSONObject.NULL) null else value
             if (parts.isEmpty()) return v
-            val top = (root as? JSONObject)?.let { JSONObject(it.toString()) } ?: JSONObject()
+            // Mexe na própria cópia local (sem duplicar tudo a cada evento: com fotos no chat ficaria pesado).
+            val top = (root as? JSONObject) ?: JSONObject()
             var node = top
             for (p in parts.dropLast(1)) {
                 val next = node.optJSONObject(p) ?: JSONObject().also { node.put(p, it) }

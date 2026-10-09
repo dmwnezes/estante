@@ -15,7 +15,7 @@ data class PlayState(
 
 data class Person(val id: String, val name: String, val lastSeen: Long, val platform: String)
 
-data class ChatMessage(val id: String, val name: String, val text: String, val at: Long, val by: String)
+data class ChatMessage(val id: String, val name: String, val text: String, val at: Long, val by: String, val image: String? = null)
 
 /** Contas da sincronia (sem Android, para poder testar). */
 object PartySync {

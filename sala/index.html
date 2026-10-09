@@ -86,9 +86,21 @@
 
   form { display: flex; gap: 8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); flex: none; }
   form input { flex: 1; max-width: none; border-radius: 28px; border-color: transparent; }
-  form button { width: 48px; height: 48px; flex: none; border-radius: 50%; border: 0; background: var(--line); color: var(--muted); display: flex; align-items: center; justify-content: center; }
+  form button, form .pic { width: 48px; height: 48px; flex: none; border-radius: 50%; border: 0; background: var(--line); color: var(--muted); display: flex; align-items: center; justify-content: center; }
   form button.on { background: var(--accent); color: var(--on-accent); }
   form svg { width: 22px; height: 22px; }
+  form .pic { background: var(--card); color: var(--accent); cursor: pointer; }
+  form .pic.busy { opacity: .5; pointer-events: none; }
+  #file { display: none; }
+  .bubble.photo { padding: 4px; max-width: 70%; }
+  .bubble.photo small { padding: 2px 8px 4px; }
+  .bubble.photo .cap { padding: 4px 8px 4px; }
+  .bubble img { display: block; width: 100%; max-width: 260px; max-height: 320px; object-fit: cover; border-radius: 12px; background: rgba(0,0,0,.25); cursor: zoom-in; }
+  #viewer { position: fixed; inset: 0; z-index: 50; background: #000; display: none; align-items: center; justify-content: center; }
+  #viewer.show { display: flex; }
+  #viewer img { max-width: 100%; max-height: 100%; object-fit: contain; -webkit-touch-callout: default; }
+  #viewer button { position: absolute; top: calc(10px + env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px; border-radius: 50%; border: 0; background: rgba(255,255,255,.15); color: #fff; font-size: 22px; }
+  #viewer p { position: absolute; bottom: calc(14px + env(safe-area-inset-bottom)); left: 0; right: 0; text-align: center; color: rgba(255,255,255,.6); font-size: 12px; margin: 0; }
 
   @media (orientation: landscape) and (max-height: 500px) {
     body { flex-direction: row; }
@@ -127,11 +139,14 @@
     <div class="mini" id="mini"><div class="dots" id="miniDots"></div><div class="names" id="miniNames"></div><div class="c" id="miniCode"></div></div>
     <div id="chat"><div class="empty">O chat da sala aparece aqui.</div></div>
     <form id="form" autocomplete="off">
+      <label class="pic" id="pic" aria-label="Mandar foto"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 5H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Zm0 12H5l3.5-4.5 2.5 3 3.5-4.5L19 17ZM8.5 10A1.5 1.5 0 1 0 8.5 7a1.5 1.5 0 0 0 0 3Z"/></svg><input type="file" id="file" accept="image/*"></label>
       <input type="text" id="text" placeholder="Mensagem para a sala" maxlength="500" enterkeyhint="send">
       <button id="send" aria-label="Enviar"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12 2-12 2z"/></svg></button>
     </form>
   </div>
 </section>
+
+<div id="viewer"><img id="viewerImg" alt="Foto"><button id="viewerClose" aria-label="Fechar">✕</button><p>Segure a foto para salvar</p></div>
 
 <script>
 (() => {
@@ -161,7 +176,8 @@
   function setAt(root, path, value) {
     const parts = path.split("/").filter(Boolean);
     if (!parts.length) return value;
-    const top = root && typeof root === "object" ? clone(root) : {};
+    // Mexe na própria cópia (sem duplicar tudo a cada evento: com fotos no chat ficaria pesado).
+    const top = root && typeof root === "object" ? root : {};
     let node = top;
     for (const p of parts.slice(0, -1)) { if (!node[p] || typeof node[p] !== "object") node[p] = {}; node = node[p]; }
     if (value === null) delete node[parts.at(-1)]; else node[parts.at(-1)] = value;
@@ -267,20 +283,73 @@
     $("miniNames").textContent = list.map((x) => (x.id === me ? "você" : x.name)).join(", ");
     renderChat();
   }
-  let lastChatHtml = "";
+  // Só fotos de verdade (nada de link escondido na mensagem).
+  const validImg = (d) => typeof d === "string" && /^data:image\/(jpeg|png|webp);base64,/.test(d) && /^[A-Za-z0-9+/=]+$/.test(d.slice(d.indexOf(",") + 1));
+  let renderedKeys = [];
+  function lineNode(l) {
+    if (l.s) { const d = document.createElement("div"); d.className = "sys"; d.textContent = l.s.text; return d; }
+    const m = l.m, mine = m.by === me, img = validImg(m.img) ? m.img : null;
+    const wrap = document.createElement("div"); wrap.className = "msg" + (mine ? " mine" : "");
+    const b = document.createElement("div"); b.className = "bubble" + (img ? " photo" : "");
+    if (!mine) { const n = document.createElement("small"); n.style.color = colorOf(m.name || "?"); n.textContent = m.name || "?"; b.appendChild(n); }
+    if (img) {
+      const i = document.createElement("img"); i.src = img; i.alt = "Foto"; i.loading = "lazy";
+      i.addEventListener("load", () => { const box = $("chat"); if (box.scrollHeight - box.scrollTop - box.clientHeight < 400) box.scrollTop = box.scrollHeight; });
+      i.addEventListener("click", () => openViewer(img));
+      b.appendChild(i);
+    }
+    if (m.text) { const t = document.createElement(img ? "div" : "span"); if (img) t.className = "cap"; t.textContent = m.text; b.appendChild(t); }
+    wrap.appendChild(b);
+    return wrap;
+  }
   function renderChat() {
     const c = (tree && tree.chat) || {};
     const msgs = Object.entries(c).map(([id, m]) => ({ id, ...m })).sort((a, b) => (a.at || 0) - (b.at || 0) || a.id.localeCompare(b.id)).slice(-300);
-    const lines = [...msgs.map((m) => ({ at: m.at || 0, m })), ...systemLines.map((s) => ({ at: s.at, s }))].sort((a, b) => a.at - b.at);
-    const html = lines.length ? lines.map((l) => l.s ? `<div class="sys">${esc(l.s.text)}</div>` :
-      `<div class="msg ${l.m.by === me ? "mine" : ""}"><div class="bubble">${l.m.by === me ? "" : `<small style="color:${colorOf(l.m.name || "?")}">${esc(l.m.name || "?")}</small>`}${esc(l.m.text || "")}</div></div>`).join("")
-      : '<div class="empty">O chat da sala aparece aqui.</div>';
-    if (html === lastChatHtml) return;
+    const lines = [...msgs.map((m) => ({ at: m.at || 0, key: "m" + m.id, m })), ...systemLines.map((s, i) => ({ at: s.at, key: "s" + i, s }))].sort((a, b) => a.at - b.at);
+    const keys = lines.map((l) => l.key);
+    if (keys.join("|") === renderedKeys.join("|")) return;
     const box = $("chat");
     const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-    box.innerHTML = html; lastChatHtml = html;
-    if (atBottom) box.scrollTop = box.scrollHeight;
+    const appendOnly = renderedKeys.length > 0 && renderedKeys.every((k, i) => keys[i] === k);
+    if (!lines.length) box.innerHTML = '<div class="empty">O chat da sala aparece aqui.</div>';
+    else if (appendOnly) lines.slice(renderedKeys.length).forEach((l) => box.appendChild(lineNode(l)));
+    else { box.textContent = ""; lines.forEach((l) => box.appendChild(lineNode(l))); }
+    renderedKeys = keys;
+    if (atBottom || (lines.at(-1)?.m?.by === me)) box.scrollTop = box.scrollHeight;
   }
+
+  // ---------- Fotos ----------
+  function openViewer(src) { $("viewerImg").src = src; $("viewer").classList.add("show"); }
+  $("viewerClose").addEventListener("click", () => $("viewer").classList.remove("show"));
+  $("viewer").addEventListener("click", (e) => { if (e.target.id === "viewer") $("viewer").classList.remove("show"); });
+
+  /** Reduz a foto (lado maior 1024 px, até ~180 KB) e devolve como texto para ir na mensagem. */
+  async function shrink(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((ok, fail) => { const i = new Image(); i.onload = () => ok(i); i.onerror = fail; i.src = url; });
+      const scale = Math.min(1, 1024 / Math.max(img.naturalWidth, img.naturalHeight));
+      const cv = document.createElement("canvas");
+      cv.width = Math.max(1, Math.round(img.naturalWidth * scale)); cv.height = Math.max(1, Math.round(img.naturalHeight * scale));
+      const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height); ctx.drawImage(img, 0, 0, cv.width, cv.height);
+      let q = 0.82, out;
+      do { out = cv.toDataURL("image/jpeg", q); q -= 0.1; } while (out.length * 0.75 > 180000 && q >= 0.32);
+      return out;
+    } finally { URL.revokeObjectURL(url); }
+  }
+  $("file").addEventListener("change", async (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f || !joined) return;
+    $("pic").classList.add("busy");
+    try {
+      const data = await shrink(f);
+      const caption = textInput.value.trim().slice(0, 500);
+      textInput.value = ""; $("send").classList.remove("on");
+      await api("POST", "/chat", { name: myName, text: caption, img: data, at: SV, by: me });
+    } catch (_) { alert("Não consegui mandar essa foto."); }
+    $("pic").classList.remove("busy");
+  });
 
   const textInput = $("text");
   // O botão de enviar não "rouba" o foco: o teclado continua aberto depois de mandar.

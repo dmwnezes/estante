@@ -103,7 +103,9 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
         }
         t.optJSONObject("chat")?.let { c ->
             _messages.value = c.keys().asSequence().mapNotNull { id ->
-                c.optJSONObject(id)?.let { ChatMessage(id, it.optString("name", "?"), it.optString("text"), it.optLong("at"), it.optString("by")) }
+                c.optJSONObject(id)?.let {
+                    ChatMessage(id, it.optString("name", "?"), it.optString("text"), it.optLong("at"), it.optString("by"), it.optString("img").takeIf(ChatImages::isValid))
+                }
             }.sortedWith(compareBy({ it.at }, { it.id })).toList().takeLast(300)
         }
         t.optJSONObject("state")?.let { s ->
@@ -125,6 +127,16 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
         scope.launch {
             runCatching { db.push("$root/chat", JSONObject().put("name", myName).put("text", t).put("at", SERVER_TIME).put("by", me)) }
                 .onFailure { _error.value = it.message }
+        }
+    }
+
+    /** Manda uma foto (já reduzida por [ChatImages.prepare]), com legenda opcional. */
+    fun sendImage(dataUrl: String, caption: String = "") {
+        if (!ChatImages.isValid(dataUrl)) return
+        scope.launch {
+            runCatching {
+                db.push("$root/chat", JSONObject().put("name", myName).put("text", caption.trim().take(500)).put("img", dataUrl).put("at", SERVER_TIME).put("by", me))
+            }.onFailure { _error.value = it.message }
         }
     }
 

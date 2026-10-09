@@ -42,6 +42,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Image
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -229,6 +233,21 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
     var full by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(session.serverNow()) }
     val systemLines = remember { mutableStateListOf<Line>() }
+    var viewing by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var sendingPhoto by remember { mutableStateOf(false) }
+    val roomScope = rememberCoroutineScope()
+    // Foto escolhida: reduz e manda (o texto que estiver digitado vai junto como legenda).
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+        if (uri != null) {
+            sendingPhoto = true
+            roomScope.launch {
+                val data = ChatImages.prepare(context, uri)
+                if (data != null) { session.sendImage(data, text); text = "" }
+                else android.widget.Toast.makeText(context, "Não consegui abrir essa foto.", android.widget.Toast.LENGTH_SHORT).show()
+                sendingPhoto = false
+            }
+        }
+    }
     val listState = rememberLazyListState()
     val imeVisible = WindowInsets.isImeVisible
 
@@ -339,6 +358,8 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
         context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, msg), "Convidar para a sala"))
     }
 
+    viewing?.let { PhotoViewer(it) { viewing = null } }
+
     Column(Modifier.fillMaxSize().then(if (full) Modifier else Modifier.statusBarsPadding().navigationBarsPadding().imePadding())) {
         // Filme
         Box(if (full) Modifier.fillMaxSize().background(Color.Black) else Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)) {
@@ -427,12 +448,21 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
             items(lines, key = { it.key }) { line ->
                 val m = line.msg
                 if (m == null) Text(line.system.orEmpty(), color = Cinema.muted, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp))
-                else Bubble(m, mine = m.by == session.me)
+                else Bubble(m, mine = m.by == session.me, onPhoto = { viewing = it })
             }
         }
 
         // Escrever
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(
+                onClick = { pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                enabled = !sendingPhoto,
+                modifier = Modifier.size(48.dp).clip(CircleShape).background(Color(0xFF241D19)),
+            ) {
+                if (sendingPhoto) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Cinema.accent)
+                else Icon(Icons.Rounded.Image, "Mandar foto", tint = Cinema.accent)
+            }
+            Spacer(Modifier.width(8.dp))
             OutlinedTextField(
                 value = text, onValueChange = { text = it.take(500) },
                 placeholder = { Text("Mensagem para a sala") },
@@ -475,16 +505,24 @@ fun Avatar(p: Person, isHost: Boolean, isMe: Boolean) {
 }
 
 @Composable
-private fun Bubble(m: ChatMessage, mine: Boolean) {
+private fun Bubble(m: ChatMessage, mine: Boolean, onPhoto: (androidx.compose.ui.graphics.ImageBitmap) -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Column(
-            Modifier.widthIn(max = 280.dp)
+            Modifier.widthIn(max = if (m.image != null) 240.dp else 280.dp)
                 .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp))
                 .background(if (mine) Cinema.accent else Color(0xFF2B231E))
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(if (m.image != null) 4.dp else 0.dp)
+                .padding(horizontal = if (m.image != null) 0.dp else 12.dp, vertical = if (m.image != null) 0.dp else 8.dp),
         ) {
-            if (!mine) Text(m.name, color = personColor(m.name), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            Text(m.text, color = if (mine) Cinema.onAccent else Cinema.text, fontSize = 15.sp)
+            if (!mine) Text(
+                m.name, color = personColor(m.name), fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                modifier = if (m.image != null) Modifier.padding(start = 8.dp, top = 4.dp, bottom = 4.dp) else Modifier,
+            )
+            m.image?.let { ChatPhoto(m.id, it, onPhoto) }
+            if (m.text.isNotBlank()) Text(
+                m.text, color = if (mine) Cinema.onAccent else Cinema.text, fontSize = 15.sp,
+                modifier = if (m.image != null) Modifier.padding(horizontal = 8.dp, vertical = 6.dp) else Modifier,
+            )
         }
     }
 }
