@@ -381,8 +381,15 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
     viewing?.let { PhotoViewer(it) { viewing = null } }
 
     Column(Modifier.fillMaxSize().then(if (full) Modifier else Modifier.statusBarsPadding().navigationBarsPadding().imePadding())) {
-        // Filme
-        Box(if (full) Modifier.fillMaxSize().background(Color.Black) else Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)) {
+        // Filme (com o teclado aberto fica menor, para sobrar espaço ao chat)
+        val onlineNow = people.filter { PartySync.online(it, now) }
+        Box(
+            when {
+                full -> Modifier.fillMaxSize().background(Color.Black)
+                imeVisible -> Modifier.fillMaxWidth().height(190.dp).background(Color.Black)
+                else -> Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)
+            }
+        ) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->
@@ -400,12 +407,24 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Sair da sala", tint = Color.White)
             }
             FloatingReactions(reactions, since = session.startedAt - 5_000, serverNow = { session.serverNow() })
+            // Teclado aberto: quem está na sala fica por cima do vídeo, no canto.
+            if (imeVisible && !full) Row(Modifier.align(Alignment.BottomStart).padding(10.dp), horizontalArrangement = Arrangement.spacedBy((-8).dp)) {
+                onlineNow.take(5).forEach { p ->
+                    Box {
+                        Box(
+                            Modifier.size(30.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.6f)).padding(2.dp).clip(CircleShape).background(personColor(p.name)),
+                            contentAlignment = Alignment.Center,
+                        ) { Text(p.name.trim().take(1).uppercase().ifBlank { "?" }, color = Cinema.onAccent, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold) }
+                        if (p.id == host) Text("👑", fontSize = 10.sp, modifier = Modifier.align(Alignment.TopCenter).offset(y = (-9).dp))
+                    }
+                }
+            }
         }
         if (full) return@Column
 
-        // Quem está na sala: uma linha só (bolinhas, filme/código e convidar)
-        val online = people.filter { PartySync.online(it, now) }
-        Row(
+        // Quem está na sala: uma linha só (bolinhas, filme/código e convidar); some com o teclado
+        val online = onlineNow
+        if (!imeVisible) Row(
             Modifier.padding(horizontal = 12.dp, vertical = 8.dp).fillMaxWidth().clip(Shapes.pill).background(Cinema.surface)
                 .padding(start = 8.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,

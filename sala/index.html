@@ -21,6 +21,17 @@
   body { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
   /* A sala ocupa só a parte visível da tela: com o teclado aberto ela encolhe (o player fica no lugar). */
   #room.on { position: fixed; left: 0; right: 0; top: var(--vv-top, 0px); height: var(--vv-h, 100dvh); }
+  /* Sala aberta: a página não rola (o Safari não consegue mais empurrar o layout). */
+  body.in-room { position: fixed; inset: 0; overflow: hidden; }
+  /* Teclado aberto (igual à referência): player menor no topo, bolinhas por cima do vídeo,
+     chat no meio e a caixa de texto colada no teclado. */
+  body.kb .player { aspect-ratio: auto; height: min(56.25vw, calc(var(--vv-h, 100dvh) * 0.34)); padding-top: 0; }
+  body.kb .mini { display: none; }
+  #pdots { position: absolute; left: 10px; bottom: 10px; display: none; z-index: 2; pointer-events: none; }
+  #pdots span { position: relative; width: 30px; height: 30px; border-radius: 50%; margin-right: -8px; border: 2px solid rgba(0,0,0,.6); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; color: #1A1438; }
+  #pdots span i { position: absolute; top: -11px; left: 50%; transform: translateX(-50%); font-size: 10px; font-style: normal; }
+  body.kb #pdots { display: flex; }
+  body.kb #chat { padding-top: 8px; }
   button { font-family: inherit; }
 
   /* Entrada */
@@ -151,6 +162,7 @@
     <video id="video" playsinline controls preload="metadata"></video>
     <div class="overlay" id="overlay"></div>
     <div id="floats"></div>
+    <div id="pdots"></div>
   </div>
   <div class="side">
     <div class="mini" id="mini">
@@ -303,7 +315,7 @@
         </div>
         <div>${esc(x.name || "?")}${x.id === me ? " (você)" : ""}</div>
       </div>`).join("") + (list.length <= 1 ? '<div class="waiting">Esperando o pessoal…</div>' : "");
-    $("miniDots").innerHTML = list.slice(0, 5).map((x) => `<span style="background:${colorOf(x.name || "?")}">${x.id === host ? "<i>👑</i>" : ""}${esc((x.name || "?").trim().charAt(0).toUpperCase())}</span>`).join("");
+    $("pdots").innerHTML = $("miniDots").innerHTML = list.slice(0, 5).map((x) => `<span style="background:${colorOf(x.name || "?")}">${x.id === host ? "<i>👑</i>" : ""}${esc((x.name || "?").trim().charAt(0).toUpperCase())}</span>`).join("");
     $("miniNames").textContent = list.length <= 1 ? "Esperando o pessoal…" : list.map((x) => (x.id === me ? "você" : x.name)).join(", ");
     renderChat();
   }
@@ -485,6 +497,7 @@
   const room = $("room");
   let fullH = 0, lastW = 0;
   function fit() {
+    if (document.body.classList.contains("in-room") && (scrollX || scrollY)) scrollTo(0, 0);
     const h = vv ? vv.height : innerHeight;
     // Altura "sem teclado": a maior já vista (zera se girar o celular).
     if (innerWidth !== lastW) { lastW = innerWidth; fullH = 0; }
@@ -519,6 +532,7 @@
     $("join").style.display = "none";
     room.style.display = "flex";
     room.classList.add("on");
+    document.body.classList.add("in-room");
     fit();
     joined = true;
     Object.keys((tree && tree.reactions) || {}).forEach((id) => seenReactions.add(id));
