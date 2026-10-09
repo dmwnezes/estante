@@ -1,0 +1,46 @@
+name: Gerar APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      VERSION_CODE: ${{ github.run_number }}
+      VERSION_NAME: 1.0.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Testar e compilar
+        run: ./gradlew testDebugUnitTest assembleRelease --no-daemon
+
+      - name: Renomear APK
+        run: cp app/build/outputs/apk/release/app-release.apk Estante.apk
+
+      - name: Publicar versão
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Estante 1.0.${{ github.run_number }}
+          body: ${{ github.event.head_commit.message }}
+          files: Estante.apk
+          make_latest: true

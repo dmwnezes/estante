@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- caixa da esquerda -->
+    <path android:fillColor="#FFC8643F" android:pathData="M33,44h13a2,2 0,0 1,2 2v24h-17v-24a2,2 0,0 1,2 -2z" />
+    <path android:fillColor="#33000000" android:pathData="M31,46a2,2 0,0 1,2 -2h2v26h-4z" />
+    <!-- caixa do meio -->
+    <path android:fillColor="#FFF0A94B" android:pathData="M48,38h13a2,2 0,0 1,2 2v30h-17v-30a2,2 0,0 1,2 -2z" />
+    <path android:fillColor="#33000000" android:pathData="M46,40a2,2 0,0 1,2 -2h2v32h-4z" />
+    <path android:fillColor="#FF2A1D17" android:pathData="M55,50l5,3.5l-5,3.5z" />
+    <!-- caixa da direita, inclinada -->
+    <group android:rotation="10" android:pivotX="72" android:pivotY="70">
+        <path android:fillColor="#FFF4E6D4" android:pathData="M65,44h13a2,2 0,0 1,2 2v24h-17v-24a2,2 0,0 1,2 -2z" />
+        <path android:fillColor="#33000000" android:pathData="M63,46a2,2 0,0 1,2 -2h2v26h-4z" />
+    </group>
+    <!-- tábua -->
+    <path android:fillColor="#FFA8744A" android:pathData="M26,70h56a2,2 0,0 1,2 2v1h-60v-1a2,2 0,0 1,2 -2z" />
+    <path android:fillColor="#FF7A4F2E" android:pathData="M24,73h60v4a2,2 0,0 1,-2 2h-56a2,2 0,0 1,-2 -2z" />
+</vector>
