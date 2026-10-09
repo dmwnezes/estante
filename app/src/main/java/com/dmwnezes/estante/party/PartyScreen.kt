@@ -20,6 +20,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -211,7 +214,7 @@ private fun Info(title: String, text: String, actions: @Composable () -> Unit) {
 /** Mensagem de sistema ("Fulana entrou") só na tela, não vai para o banco. */
 private data class Line(val key: String, val at: Long, val msg: ChatMessage?, val system: String?)
 
-@OptIn(UnstableApi::class)
+@OptIn(UnstableApi::class, ExperimentalLayoutApi::class)
 @Composable
 private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -227,6 +230,7 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
     var now by remember { mutableLongStateOf(session.serverNow()) }
     val systemLines = remember { mutableStateListOf<Line>() }
     val listState = rememberLazyListState()
+    val imeVisible = WindowInsets.isImeVisible
 
     /** Até quando ignorar eventos do player (porque fui eu que mexi por causa da sala). */
     var suppressUntil by remember { mutableLongStateOf(0L) }
@@ -311,7 +315,7 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
     }
 
     val lines = (messages.map { Line(it.id, it.at, it, null) } + systemLines).sortedBy { it.at }
-    LaunchedEffect(lines.size) { if (lines.isNotEmpty()) listState.animateScrollToItem(lines.lastIndex) }
+    LaunchedEffect(lines.size, imeVisible) { if (lines.isNotEmpty()) listState.animateScrollToItem(lines.lastIndex) }
 
     // Tela acesa; tela cheia deitada quando pedir.
     DisposableEffect(full) {
@@ -357,8 +361,30 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
         }
         if (full) return@Column
 
-        // Quem está na sala
-        Column(
+        // Quem está na sala (com o teclado aberto vira uma linha só, para sobrar espaço para o chat)
+        val online = people.filter { PartySync.online(it, now) }
+        if (imeVisible) {
+            Row(
+                Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth().clip(Shapes.pill).background(Color(0xFF241D19))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy((-8).dp)) {
+                    online.take(5).forEach { p ->
+                        Box(
+                            Modifier.size(24.dp).clip(CircleShape).background(Color(0xFF241D19)).padding(1.5.dp).clip(CircleShape).background(personColor(p.name)),
+                            contentAlignment = Alignment.Center,
+                        ) { Text(p.name.trim().take(1).uppercase(), color = Color(0xFF1A1310), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold) }
+                    }
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    online.joinToString(", ") { if (it.id == session.me) "você" else it.name },
+                    color = Cinema.muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                )
+                Text("Sala ${session.code}", color = Cinema.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+        } else Column(
             Modifier.padding(12.dp).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color(0xFF241D19)).padding(14.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -376,7 +402,6 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
                 }
             }
             Spacer(Modifier.height(12.dp))
-            val online = people.filter { PartySync.online(it, now) }
             LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 items(online, key = { it.id }) { p -> Avatar(p, isHost = p.id == host, isMe = p.id == session.me) }
                 if (online.size <= 1) item {

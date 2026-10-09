@@ -16,8 +16,10 @@
     --text: #F7EEE6; --muted: #BFAE9F; --accent: #F0A94B; --on-accent: #2A1A0E; --red: #E5737A; --green: #5FD38D;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: Outfit, system-ui, -apple-system, sans-serif; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: Outfit, system-ui, -apple-system, sans-serif; overscroll-behavior: none; }
   body { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+  /* A sala ocupa só a parte visível da tela: com o teclado aberto ela encolhe (o player fica no lugar). */
+  #room.on { position: fixed; left: 0; right: 0; top: var(--vv-top, 0px); height: var(--vv-h, 100dvh); }
   button { font-family: inherit; }
 
   /* Entrada */
@@ -41,7 +43,7 @@
   .err { color: var(--red); font-size: 14px; max-width: 320px; }
 
   /* Sala */
-  #room { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  #room { display: none; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
   .player { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; flex: none; padding-top: env(safe-area-inset-top); box-sizing: content-box; }
   video { width: 100%; height: 100%; display: block; background: #000; }
   .overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 20px; background: rgba(0,0,0,.75); color: #fff; font-size: 15px; line-height: 1.4; }
@@ -63,6 +65,15 @@
   .av .dot { position: absolute; right: -1px; bottom: -1px; width: 14px; height: 14px; border-radius: 50%; background: var(--green); border: 2px solid var(--card); }
   .person div:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .waiting { color: var(--muted); font-size: 13px; padding-top: 6px; }
+  /* Teclado aberto: a faixa de quem está na sala vira uma linha só. */
+  .mini { display: none; align-items: center; gap: 10px; margin: 6px 12px; padding: 6px 12px; border-radius: 999px; background: var(--card); flex: none; }
+  .mini .dots { display: flex; }
+  .mini .dots span { width: 24px; height: 24px; border-radius: 50%; margin-right: -8px; border: 2px solid var(--card); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #1A1310; }
+  .mini .names { flex: 1; min-width: 0; margin-left: 8px; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mini .c { color: var(--accent); font-size: 12px; font-weight: 600; }
+  body.kb .card { display: none; }
+  body.kb .mini { display: flex; }
+  body.kb form { padding-bottom: 8px; }
 
   #chat { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 14px; display: flex; flex-direction: column; gap: 6px; -webkit-overflow-scrolling: touch; }
   .msg { display: flex; }
@@ -113,6 +124,7 @@
       </div>
       <div class="people" id="people"></div>
     </div>
+    <div class="mini" id="mini"><div class="dots" id="miniDots"></div><div class="names" id="miniNames"></div><div class="c" id="miniCode"></div></div>
     <div id="chat"><div class="empty">O chat da sala aparece aqui.</div></div>
     <form id="form" autocomplete="off">
       <input type="text" id="text" placeholder="Mensagem para a sala" maxlength="500" enterkeyhint="send">
@@ -251,6 +263,8 @@
         </div>
         <div>${esc(x.name || "?")}${x.id === me ? " (você)" : ""}</div>
       </div>`).join("") + (list.length <= 1 ? '<div class="waiting">Esperando o pessoal…</div>' : "");
+    $("miniDots").innerHTML = list.slice(0, 5).map((x) => `<span style="background:${colorOf(x.name || "?")}">${esc((x.name || "?").trim().charAt(0).toUpperCase())}</span>`).join("");
+    $("miniNames").textContent = list.map((x) => (x.id === me ? "você" : x.name)).join(", ");
     renderChat();
   }
   let lastChatHtml = "";
@@ -269,12 +283,16 @@
   }
 
   const textInput = $("text");
+  // O botão de enviar não "rouba" o foco: o teclado continua aberto depois de mandar.
+  $("send").addEventListener("mousedown", (e) => e.preventDefault());
+  $("send").addEventListener("pointerdown", (e) => e.preventDefault());
   textInput.addEventListener("input", () => $("send").classList.toggle("on", !!textInput.value.trim()));
   $("form").addEventListener("submit", (e) => {
     e.preventDefault();
     const t = textInput.value.trim();
     if (!t) return;
     textInput.value = ""; $("send").classList.remove("on");
+    textInput.focus();
     api("POST", "/chat", { name: myName, text: t.slice(0, 500), at: SV, by: me }).catch(showConn);
     $("chat").scrollTop = $("chat").scrollHeight;
   });
@@ -322,6 +340,33 @@
     } catch (_) { showConn(false); }
   }
 
+  // ---------- Teclado (iPhone) ----------
+  // O Safari não encolhe a página quando o teclado abre: ele rola tudo para cima. Aqui a sala
+  // acompanha a área visível, então o player continua no topo e a caixa de texto fica no teclado.
+  const vv = window.visualViewport;
+  const room = $("room");
+  let fullH = 0, lastW = 0;
+  function fit() {
+    const h = vv ? vv.height : innerHeight;
+    // Altura "sem teclado": a maior já vista (zera se girar o celular).
+    if (innerWidth !== lastW) { lastW = innerWidth; fullH = 0; }
+    fullH = Math.max(fullH, h);
+    const top = vv ? vv.offsetTop : 0;
+    document.documentElement.style.setProperty("--vv-h", h + "px");
+    document.documentElement.style.setProperty("--vv-top", top + "px");
+    const kb = h < fullH * 0.78 && document.activeElement === textInput;
+    if (kb !== document.body.classList.contains("kb")) {
+      document.body.classList.toggle("kb", kb);
+      requestAnimationFrame(() => { $("chat").scrollTop = $("chat").scrollHeight; });
+    }
+  }
+  if (vv) { vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit); }
+  addEventListener("resize", fit);
+  textInput.addEventListener("focus", () => setTimeout(fit, 50));
+  textInput.addEventListener("blur", () => setTimeout(fit, 50));
+  // Toque fora da caixa (no chat) fecha o teclado.
+  $("chat").addEventListener("touchstart", () => { if (document.activeElement === textInput) textInput.blur(); }, { passive: true });
+
   // ---------- Entrar ----------
   $("name").addEventListener("input", () => { $("enter").disabled = !$("name").value.trim() || !tree || !tree.video; });
   $("name").addEventListener("keydown", (e) => { if (e.key === "Enter" && !$("enter").disabled) $("enter").click(); });
@@ -334,7 +379,10 @@
     document.title = `${v.title} · Estante`;
     video.src = `https://www.googleapis.com/drive/v3/files/${v.fileId}?alt=media&supportsAllDrives=true&key=${v.key}`;
     $("join").style.display = "none";
-    $("room").style.display = "flex";
+    room.style.display = "flex";
+    room.classList.add("on");
+    $("miniCode").textContent = code;
+    fit();
     joined = true;
     await heartbeat();
     setInterval(heartbeat, 10000);
