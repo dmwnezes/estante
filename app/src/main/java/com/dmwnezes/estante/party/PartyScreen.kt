@@ -143,7 +143,7 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
         val sub = video.subtitle?.takeIf { it.startsWith("drive:") }?.removePrefix("drive:")
         runCatching {
             s.create(
-                RoomVideo(video.ref, video.title, PartyConfig.apiKey, sub, if (video.fileName?.lowercase()?.endsWith(".mov") == true) "video/quicktime" else "video/mp4"),
+                RoomVideo(video.ref, video.title, PartyConfig.apiKey, sub, PartySync.roomMime(video.fileName)),
                 Resume.startAt(video) / 1000.0,
             )
         }.onFailure { failMsg = it.message ?: "Não consegui criar a sala."; step = Step.FAILED; return@LaunchedEffect }
@@ -184,7 +184,7 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
                     }
                     Step.INCOMPATIBLE -> Info(
                         "Esse formato não toca no iPhone",
-                        "O Safari do iPhone toca MP4 e MOV. Este arquivo (${video.fileName ?: "formato desconhecido"}) provavelmente não vai abrir para ela. Dá para converter para MP4 no computador (HandBrake, grátis) e colocar no Drive.",
+                        "O Safari do iPhone toca MP4, MOV e MKV (MKV só no iOS 17.1 ou mais novo). Este arquivo (${video.fileName ?: "formato desconhecido"}) provavelmente não vai abrir para ela. Dá para converter para MP4 no computador (HandBrake, grátis) e colocar no Drive.",
                     ) {
                         PillButton("Abrir assim mesmo", null, { acceptIncompatible = true }, filled = false)
                     }

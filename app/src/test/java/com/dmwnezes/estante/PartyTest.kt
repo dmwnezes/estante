@@ -60,7 +60,10 @@ class PartyTest {
 
     @Test fun `formatos que o iphone toca`() {
         assertTrue(PartySync.iphoneFriendly("Filme.MP4", null))
-        assertFalse(PartySync.iphoneFriendly("Filme.mkv", null))
+        assertTrue(PartySync.iphoneFriendly("Filme.mkv", null))
+        assertFalse(PartySync.iphoneFriendly("Filme.avi", null))
+        assertEquals("video/x-matroska", PartySync.roomMime("A.MKV"))
+        assertEquals("video/mp4", PartySync.roomMime(null))
         assertTrue(PartySync.iphoneFriendly(null, "video/mp4"))
     }
 

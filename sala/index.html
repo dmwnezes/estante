@@ -186,6 +186,7 @@
 
 <div id="viewer"><img id="viewerImg" alt="Foto"><button id="viewerClose" aria-label="Fechar">✕</button><p>Segure a foto para salvar</p></div>
 
+<script src="mkv.js"></script>
 <script>
 (() => {
   "use strict";
@@ -276,7 +277,55 @@
   video.addEventListener("play", () => { if (!consume("play") && joined) sendState(true); });
   video.addEventListener("pause", () => { if (!consume("pause") && joined && !video.seeking && !video.ended) sendState(false); });
   video.addEventListener("seeked", () => { if (!consume("seek") && joined) sendState(!video.paused); });
-  video.addEventListener("error", showVideoError);
+  video.addEventListener("error", () => {
+    // O Safari não abre MKV sozinho: se o arquivo for MKV, troca para o conversor do site.
+    if (!mkvTried && roomVideo && video.error && video.error.code >= 3) { probeMkv(roomVideo); return; }
+    showVideoError();
+  });
+
+  // ---------- Fonte do vídeo (direto do Drive, ou MKV convertido na hora) ----------
+  let roomVideo = null, mkv = null, mkvTried = false;
+  const driveUrl = (v) => `https://www.googleapis.com/drive/v3/files/${v.fileId}?alt=media&supportsAllDrives=true&key=${v.key}`;
+  const isMkv = (v) => /matroska/i.test(v.mime || "") || /\.mkv$/i.test(v.name || "");
+  const canMse = () => !!(window.ManagedMediaSource || window.MediaSource) && !!window.EstanteMkv;
+  function note(text) { systemLines.push({ at: serverNow(), text }); renderChat(); }
+  function startSource(v) {
+    roomVideo = v;
+    if (mkv) { mkv.destroy(); mkv = null; }
+    if ((isMkv(v) || mkvTried) && canMse()) startMkv(v);
+    else { video.removeAttribute("src"); video.src = driveUrl(v); }
+  }
+  function startMkv(v) {
+    mkvTried = true;
+    if (mkv) mkv.destroy();
+    mkv = EstanteMkv.MkvPlayer(video, driveUrl(v), {
+      sizeUrl: `https://www.googleapis.com/drive/v3/files/${v.fileId}?fields=size&supportsAllDrives=true&key=${v.key}`,
+      onError: (msg) => overlay(msg, "Tentar de novo", () => { hideOverlay(); retrySource(); }),
+      onInfo: note,
+      subtitles: !v.subtitleId,
+    });
+    if (!mkv) {
+      overlay("Este navegador não consegue tocar MKV. No iPhone, precisa do iOS 17.1 ou mais novo (Ajustes › Geral › Atualização de Software).", "Tentar de novo", () => { hideOverlay(); retrySource(); });
+    }
+  }
+  /** O arquivo veio sem nome (sala antiga): olha os primeiros bytes para ver se é MKV. */
+  async function probeMkv(v) {
+    mkvTried = true;
+    try {
+      if (!canMse()) throw 0;
+      const r = await fetch(driveUrl(v), { headers: { Range: "bytes=0-3" } });
+      if (!r.ok) throw 0;
+      const b = new Uint8Array(await r.arrayBuffer());
+      if (!EstanteMkv.looksLikeMkv(b)) throw 0;
+    } catch (_) { showVideoError(); return; }
+    startMkv(v);
+    if (lastState) { pendingSeek = expected(lastState); if (lastState.playing) doPlay(); }
+  }
+  function retrySource() {
+    if (!roomVideo) return;
+    startSource(roomVideo);
+    if (lastState) { pendingSeek = expected(lastState); applyRemote(lastState); }
+  }
 
   function hideOverlay() { $("overlay").classList.remove("show"); }
   function overlay(html, button, onTap) {
@@ -300,14 +349,10 @@
   function showVideoError() {
     const code = video.error ? video.error.code : 0;
     const msg = code === 4
-      ? "Este navegador não conseguiu abrir o filme. Ele precisa estar compartilhado no Drive como “qualquer pessoa com o link” e ser MP4."
+      ? "Este navegador não conseguiu abrir o filme. Ele precisa estar compartilhado no Drive como “qualquer pessoa com o link” e ser MP4, MOV ou MKV."
       : code === 3 ? "O filme abriu, mas este aparelho não consegue tocar esse formato (o mais seguro é MP4)."
       : "Não consegui baixar o filme do Drive. Confira a internet.";
-    overlay(msg, "Tentar de novo", () => {
-      hideOverlay();
-      video.load();
-      if (lastState) applyRemote(lastState);
-    });
+    overlay(msg, "Tentar de novo", () => { hideOverlay(); retrySource(); });
   }
 
   // A cada 3 s confere se escorregou mais de 1,5 s e ajusta.
@@ -601,7 +646,7 @@
     fit();
     joined = true;
     Object.keys((tree && tree.reactions) || {}).forEach((id) => seenReactions.add(id));
-    video.src = `https://www.googleapis.com/drive/v3/files/${v.fileId}?alt=media&supportsAllDrives=true&key=${v.key}`;
+    startSource(v);
     // Ainda dentro do toque em "Entrar": dá play já (o navegador libera som e play automático
     // para o resto da sessão). Se a sala estiver pausada, pausa assim que começar.
     const s0 = tree.state;

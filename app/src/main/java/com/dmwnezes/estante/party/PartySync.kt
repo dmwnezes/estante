@@ -64,11 +64,22 @@ object PartySync {
     /** Link que a amiga abre no iPhone: código da sala e o banco ficam depois do #. */
     fun link(code: String, dbUrl: String): String = "$SITE#$code@${dbUrl.removePrefix("https://")}"
 
-    /** O iPhone (Safari) toca MP4/MOV (H.264 ou HEVC); MKV, AVI e WEBM não. */
+    /**
+     * O iPhone (Safari) toca MP4/MOV (H.264 ou HEVC). MKV o site converte na hora
+     * (precisa do iOS 17.1+); AVI, WEBM e outros não abrem.
+     */
     fun iphoneFriendly(fileName: String?, mime: String?): Boolean {
         val ext = fileName?.substringAfterLast('.', "")?.lowercase().orEmpty()
-        if (ext in setOf("mp4", "m4v", "mov")) return true
-        if (ext in setOf("mkv", "avi", "webm", "wmv", "flv")) return false
+        if (ext in setOf("mp4", "m4v", "mov", "mkv")) return true
+        if (ext in setOf("avi", "webm", "wmv", "flv")) return false
         return mime in setOf("video/mp4", "video/quicktime", "video/x-m4v")
+    }
+
+    /** Tipo do arquivo que vai para a sala (o site usa para saber se precisa converter o MKV). */
+    fun roomMime(fileName: String?): String = when (fileName?.substringAfterLast('.', "")?.lowercase()) {
+        "mov" -> "video/quicktime"
+        "mkv" -> "video/x-matroska"
+        "webm" -> "video/webm"
+        else -> "video/mp4"
     }
 }
