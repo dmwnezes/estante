@@ -112,12 +112,6 @@ fun SettingsScreen(onBack: () -> Unit, onCheckUpdate: () -> Unit, updateAvailabl
                     if (diary.isEmpty()) "Diário de sessões" else "Diário de sessões (${diary.size})",
                     androidx.compose.material.icons.Icons.Rounded.Groups, onDiary,
                 )
-                Spacer(Modifier.height(10.dp))
-                var perSession by remember { mutableStateOf(com.dmwnezes.estante.party.PartyConfig.copyPerSession) }
-                CheckRow("Cópia nova do filme a cada sessão (evita o Google travar o filme no meio; vai para a lixeira quando a sala fecha)", perSession) {
-                    perSession = !perSession
-                    com.dmwnezes.estante.party.PartyConfig.copyPerSession = perSession
-                }
                 Spacer(Modifier.height(14.dp))
                 PartySettings()
             }

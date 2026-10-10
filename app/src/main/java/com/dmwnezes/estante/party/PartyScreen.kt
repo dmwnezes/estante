@@ -110,7 +110,7 @@ import com.dmwnezes.estante.ui.TopBar
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private enum class Step { CHECKING, NOT_CONFIGURED, NEED_NAME, INCOMPATIBLE, NOT_SHARED, BLOCKED, ASK_COPY, COPYING, BAD_KEY, FAILED, ROOM }
+private enum class Step { CHECKING, NOT_CONFIGURED, NEED_NAME, INCOMPATIBLE, NOT_SHARED, BLOCKED, COPYING, BAD_KEY, FAILED, ROOM }
 
 /** Cor fixa por pessoa (pelo nome), para o avatar e o nome no chat. */
 fun personColor(name: String): Color {
@@ -138,8 +138,7 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
     var sharing by remember { mutableStateOf(false) }
     var shareError by remember { mutableStateOf<String?>(null) }
     var autoShareTried by remember { mutableStateOf(false) }
-    var skipCopy by remember { mutableStateOf(false) }
-    var copyNote by remember { mutableStateOf<String?>(null) }
+
 
     /** Compartilha o filme (e a legenda) e espera o Google liberar para a chave do site. Devolve o erro, se houver. */
     suspend fun shareFiles(token: String): String? = runCatching {
@@ -208,19 +207,15 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
             is ShareCheck.Failed -> { failMsg = c.message; step = Step.FAILED; return@LaunchedEffect }
             is ShareCheck.Blocked, ShareCheck.Ok -> {}
         }
-        // Cópia nova a cada sessão (limite de downloads zerado). Obrigatória se o Google já bloqueou o original.
+        // Só se o Google já bloqueou o original (limite de downloads): aí faz uma cópia para destravar.
         var roomFile = video.ref
-        val blocked = PartyConfig.checkDownload(video.ref) is ShareCheck.Blocked
-        if (blocked || (PartyConfig.copyPerSession && !skipCopy)) {
+        if (PartyConfig.checkDownload(video.ref) is ShareCheck.Blocked) {
             val r = if (AppGraph.auth.shareGranted) runCatching { AppGraph.auth.beginShare() }.getOrNull() else null
-            if (r !is DriveAuth.ShareAuth.Token) { step = if (blocked) Step.BLOCKED else Step.ASK_COPY; return@LaunchedEffect }
+            if (r !is DriveAuth.ShareAuth.Token) { step = Step.BLOCKED; return@LaunchedEffect }
             step = Step.COPYING
             runCatching { PartyFix.freshCopy(r.token, video) }
                 .onSuccess { roomFile = it }
-                .onFailure {
-                    if (blocked) { failMsg = "O Google bloqueou este filme para quem assiste pelo link e não consegui fazer uma cópia: " + DriveShare.explain(it); step = Step.FAILED; return@LaunchedEffect }
-                    copyNote = "Não deu para fazer a cópia da sessão (${DriveShare.explain(it)}). A sala usa o arquivo original."
-                }
+                .onFailure { failMsg = "O Google bloqueou este filme para quem assiste pelo link e não consegui fazer uma cópia: " + DriveShare.explain(it); step = Step.FAILED; return@LaunchedEffect }
         }
         // A legenda também precisa estar liberada (senão o site fica sem ela, sem avisar).
         if (sub != null && AppGraph.auth.shareGranted && PartyConfig.checkShared(sub) == ShareCheck.NotShared) {
@@ -244,7 +239,7 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
 
     Box(Modifier.fillMaxSize().background(Cinema.bgBottom)) {
         if (step == Step.ROOM && session != null) {
-            Room(video, session!!, onBack, copyNote)
+            Room(video, session!!, onBack)
             return@Box
         }
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -257,22 +252,7 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
                     Step.COPYING -> {
                         CircularProgressIndicator(color = Cinema.accent)
                         Spacer(Modifier.height(14.dp))
-                        Text("Preparando a cópia do filme para esta sessão…\n(filmes grandes podem levar até um minuto)", color = Cinema.muted, textAlign = TextAlign.Center)
-                    }
-                    Step.ASK_COPY -> Info(
-                        "Deixar a sessão à prova de travadas",
-                        "O Google limita downloads de filmes abertos pelo link e pode travar o filme dela no meio. Para evitar, o app faz uma cópia do filme no seu Drive a cada sessão (vai para a lixeira quando a sala fecha). Na primeira vez o Google pede sua permissão; depois é automático.",
-                    ) {
-                        if (sharing) CircularProgressIndicator(color = Cinema.accent)
-                        else {
-                            shareError?.let {
-                                Text(it, color = Cinema.yellow, fontSize = 14.sp, textAlign = TextAlign.Center)
-                                Spacer(Modifier.height(14.dp))
-                            }
-                            PillButton("Permitir e abrir a sala", Icons.Rounded.Share, { startShare() }, Modifier.fillMaxWidth())
-                            Spacer(Modifier.height(10.dp))
-                            PillButton("Agora não (usar o original)", null, { skipCopy = true; retry++ }, Modifier.fillMaxWidth(), filled = false)
-                        }
+                        Text("O Google bloqueou este filme para quem assiste pelo link.\nFazendo uma cópia nova no seu Drive…", color = Cinema.muted, textAlign = TextAlign.Center)
                     }
                     Step.BLOCKED -> Info(
                         "O Google bloqueou este filme pelo link",
@@ -432,10 +412,6 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit, startN
         fixMsg = null
         runCatching {
             val orig = video.ref
-            if (PartyConfig.copyPerSession) {
-                session.switchFile(PartyFix.freshCopy(token, video))
-                return@runCatching "Cópia nova do filme liberada — o site volta sozinho"
-            }
             if (PartyConfig.checkShared(orig) == ShareCheck.NotShared) {
                 DriveShare.makePublic(AppGraph.http, token, orig)
                 for (k in 0 until 5) { if (PartyConfig.checkShared(orig) == ShareCheck.Ok) break; delay(1_200) }
