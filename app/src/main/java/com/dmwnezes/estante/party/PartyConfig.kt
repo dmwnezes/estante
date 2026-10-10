@@ -31,6 +31,11 @@ object PartyConfig {
         get() = prefs.getString("partyName", "").orEmpty()
         set(v) { prefs.edit().putString("partyName", v.trim()).apply() }
 
+    /** Foto de perfil da sala (chave de [Avatars]). */
+    var avatar: String
+        get() = prefs.getString("partyAvatar", "").orEmpty()
+        set(v) { prefs.edit().putString("partyAvatar", v).apply() }
+
     val ready: Boolean get() = dbUrl.isNotBlank() && apiKey.isNotBlank()
 
     fun db() = PartyDb(dbUrl, AppGraph.http)

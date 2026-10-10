@@ -32,7 +32,11 @@ private val SERVER_TIME get() = JSONObject().put(".sv", "timestamp")
  * Uma sala de "assistir junto" no Firebase:
  * salas/<código>/ host · video · state · people/<id> · chat/<id>
  */
-class PartySession(private val db: PartyDb, val code: String, val myName: String) {
+class PartySession(private val db: PartyDb, val code: String, val myName: String, avatar: String = "") {
+    /** Foto de perfil escolhida (chave de [Avatars]); pode trocar com a sala aberta. */
+    @Volatile var myAvatar: String = avatar
+        private set
+
 
     val me: String = "a-" + UUID.randomUUID().toString().take(8)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -92,7 +96,7 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
             while (isActive) {
                 runCatching {
                     val sent = System.currentTimeMillis()
-                    val r = db.put("$root/people/$me", JSONObject().put("name", myName).put("lastSeen", SERVER_TIME).put("platform", "android")) as? JSONObject
+                    val r = db.put("$root/people/$me", meJson()) as? JSONObject
                     val got = System.currentTimeMillis()
                     r?.optLong("lastSeen")?.takeIf { it > 0 }?.let { offset = PartySync.offset(sent, got, it) }
                     _error.value = null
@@ -107,7 +111,7 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
         _host.value = t.optString("host").ifBlank { null }
         t.optJSONObject("people")?.let { p ->
             _people.value = p.keys().asSequence().mapNotNull { id ->
-                p.optJSONObject(id)?.let { Person(id, it.optString("name", "?"), it.optLong("lastSeen"), it.optString("platform")) }
+                p.optJSONObject(id)?.let { Person(id, it.optString("name", "?"), it.optLong("lastSeen"), it.optString("platform"), it.optString("avatar").takeIf { a -> a.isNotBlank() }) }
             }.sortedBy { it.name.lowercase() }.toList()
         }
         _people.value.forEach { everyone[it.id] = it.name }
@@ -137,6 +141,15 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
         seq++
         val body = JSONObject().put("playing", playing).put("position", positionSec).put("at", serverNow()).put("by", me).put("seq", seq)
         scope.launch { runCatching { db.put("$root/state", body) }.onFailure { _error.value = it.message } }
+    }
+
+    private fun meJson() = JSONObject().put("name", myName).put("lastSeen", SERVER_TIME).put("platform", "android")
+        .apply { if (myAvatar.isNotBlank()) put("avatar", myAvatar) }
+
+    /** Troca a foto de perfil e avisa a sala na hora. */
+    fun setAvatar(key: String) {
+        myAvatar = key
+        scope.launch { runCatching { db.put("$root/people/$me", meJson()) } }
     }
 
     fun sendChat(text: String) {

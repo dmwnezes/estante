@@ -30,7 +30,6 @@
   body.kb .mini { display: none; }
   #pdots { position: absolute; left: 10px; top: 10px; display: none; z-index: 2; pointer-events: none; }
   #pdots span { position: relative; width: 30px; height: 30px; border-radius: 50%; margin-right: -8px; border: 2px solid rgba(0,0,0,.6); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; color: #1A1438; }
-  #pdots span i { position: absolute; top: -9px; left: 50%; transform: translateX(-50%); font-size: 10px; font-style: normal; }
   body.kb #pdots { display: flex; }
   body.kb #chat { padding-top: 8px; }
   button { font-family: inherit; }
@@ -76,7 +75,6 @@
   .person { width: 78px; flex: none; text-align: center; font-size: 11px; }
   .av { position: relative; width: 50px; height: 50px; margin: 0 auto 4px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 20px; color: #1A1438; }
   .av.me { box-shadow: 0 0 0 2px rgba(255,255,255,.7); }
-  .av .crown { position: absolute; top: -15px; left: 50%; transform: translateX(-50%); font-size: 15px; }
   .av .dot { position: absolute; right: -1px; bottom: -1px; width: 14px; height: 14px; border-radius: 50%; background: var(--green); border: 2px solid var(--card); }
   .person div:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .waiting { color: var(--muted); font-size: 13px; padding-top: 6px; }
@@ -85,7 +83,6 @@
   .mini { display: flex; align-items: center; gap: 10px; margin: 8px 12px; padding: 6px 12px 6px 8px; border-radius: 999px; background: var(--card); flex: none; }
   .mini .dots { display: flex; }
   .mini .dots span { position: relative; width: 32px; height: 32px; border-radius: 50%; margin-right: -9px; border: 2px solid var(--card); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; color: #1A1438; }
-  .mini .dots span i { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); font-size: 10px; font-style: normal; }
   .mini .names { flex: 1; min-width: 0; margin-left: 8px; display: flex; flex-direction: column; }
   .mini .names b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mini .names > span { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -144,6 +141,33 @@
   body.land:not(.kb) #room { flex-direction: row; }
   body.land:not(.kb) .player { width: 62%; height: var(--vv-h, 100dvh); aspect-ratio: auto; padding-top: 0; }
   body.land:not(.kb) .side { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  /* Fotos de perfil */
+  .pic svg, span.pic svg { width: 100%; height: 100%; display: block; border-radius: 50%; }
+  .picks { display: grid; grid-template-columns: repeat(5, 48px); gap: 10px; justify-content: center; }
+  .picks button { width: 48px; height: 48px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; box-shadow: 0 0 0 0 var(--accent); transition: box-shadow .15s, transform .15s; }
+  .picks button svg { width: 100%; height: 100%; display: block; }
+  .picks button:focus { outline: none; }
+  .picks button.on { box-shadow: 0 0 0 3px var(--accent); transform: scale(1.06); }
+  #myPic { width: 84px; height: 84px; }
+  #join .picks { margin: 0 0 4px; grid-template-columns: repeat(7, 40px); gap: 8px; }
+  #join .picks button { width: 40px; height: 40px; }
+  #join { overflow-y: auto; justify-content: safe center; }
+  @media (max-height: 760px) { #join .shelf, #join .plank { display: none; } #myPic { width: 64px; height: 64px; } }
+  .mini .dots, .mini .names { cursor: pointer; }
+  #sheet { position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; padding: 18px; background: rgba(10,7,30,.72); }
+  #sheet.show { display: flex; }
+  #sheet .box { width: 100%; max-width: 380px; max-height: 88vh; overflow-y: auto; padding: 20px; border-radius: 28px; background: var(--card); text-align: center; }
+  #sheet h2 { margin: 0 0 16px; font-size: 18px; font-weight: 600; }
+  #sheet .who { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+  #sheet .p { width: 76px; font-size: 12px; background: none; border: 0; color: var(--text); padding: 4px 0; border-radius: 16px; font-family: inherit; }
+  #sheet .p .pic, #sheet .p .ini { display: block; position: relative; width: 58px; height: 58px; margin: 0 auto 6px; border-radius: 50%; }
+  #sheet .p .ini { display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 22px; color: #1A1438; }
+  #sheet .p.me { cursor: pointer; }
+  #sheet .p.me .pic, #sheet .p.me .ini { box-shadow: 0 0 0 2px var(--accent); }
+  #sheet .p.me .edit { position: absolute; right: -2px; bottom: -2px; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 12px; display: flex; align-items: center; justify-content: center; }
+  #sheet .p div:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #sheet .hint { color: var(--muted); font-size: 12px; margin: 12px 0 14px; }
+  #sheet .btn { padding: 11px 24px; font-size: 15px; background: transparent; color: var(--text); box-shadow: inset 0 0 0 1.5px var(--outline, #4A4180); }
   .side { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 </style>
 </head>
@@ -154,7 +178,10 @@
   <div class="plank"></div>
   <h1>Assistir junto</h1>
   <p class="sub" id="joinText">Carregando a sala…</p>
+  <span class="pic" id="myPic"></span>
   <input type="text" id="name" placeholder="Seu nome" maxlength="24" autocomplete="nickname" enterkeyhint="go">
+  <p class="sub" style="margin:0">Escolha sua foto</p>
+  <div class="picks" id="joinPicks"></div>
   <button class="btn" id="enter" disabled>Entrar na sala</button>
   <p class="err" id="joinErr"></p>
 </section>
@@ -184,9 +211,11 @@
   </div>
 </section>
 
+<div id="sheet"><div class="box" id="sheetBox"></div></div>
 <div id="viewer"><img id="viewerImg" alt="Foto"><button id="viewerClose" aria-label="Fechar">✕</button><p>Segure a foto para salvar</p></div>
 
 <script src="mkv.js"></script>
+<script src="avatars.js"></script>
 <script>
 (() => {
   "use strict";
@@ -204,6 +233,30 @@
   sessionStorage.setItem("estante-id", me);
   let myName = localStorage.getItem("estante-nome") || "";
   $("name").value = myName;
+
+  // ---------- Foto de perfil ----------
+  const AVS = window.ESTANTE_AVATARS || [];
+  const avSvg = (k) => { const a = AVS.find((x) => x[0] === k); return a ? a[2] : null; };
+  let myAvatar = localStorage.getItem("estante-avatar") || "";
+  if (!avSvg(myAvatar) && AVS.length) myAvatar = AVS[Math.floor(Math.random() * AVS.length)][0];
+  /** HTML da foto: a escolhida, ou a inicial do nome na cor da pessoa. */
+  function picHtml(name, avatar, cls) {
+    const svg = avSvg(avatar);
+    if (svg) return `<span class="pic ${cls || ""}">${svg}</span>`;
+    return `<span class="ini ${cls || ""}" style="background:${colorOf(name || "?")}">${esc((name || "?").trim().charAt(0).toUpperCase())}</span>`;
+  }
+  function renderPicks(box, onPick) {
+    box.innerHTML = AVS.map(([k, label, svg]) => `<button type="button" data-k="${k}" aria-label="${label.replace(/"/g, "")}" class="${k === myAvatar ? "on" : ""}">${svg}</button>`).join("");
+    box.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+      myAvatar = b.dataset.k;
+      try { localStorage.setItem("estante-avatar", myAvatar); } catch (_) {}
+      box.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+      onPick && onPick();
+    }));
+  }
+  function renderJoinPic() { $("myPic").innerHTML = avSvg(myAvatar) || ""; }
+  renderJoinPic();
+  renderPicks($("joinPicks"), renderJoinPic);
 
   const api = (method, path, body) =>
     fetch(`${ROOT}${path}.json`, { method, body: body === undefined ? undefined : JSON.stringify(body), keepalive: method === "DELETE" })
@@ -411,14 +464,44 @@
     $("people").innerHTML = list.map((x) => `
       <div class="person">
         <div class="av ${x.id === me ? "me" : ""}" style="background:${colorOf(x.name || "?")}">
-          ${x.id === host ? '<span class="crown">👑</span>' : ""}${esc((x.name || "?").trim().charAt(0).toUpperCase())}<span class="dot"></span>
+          ${esc((x.name || "?").trim().charAt(0).toUpperCase())}<span class="dot"></span>
         </div>
         <div>${esc(x.name || "?")}${x.id === me ? " (você)" : ""}</div>
       </div>`).join("") + (list.length <= 1 ? '<div class="waiting">Esperando o pessoal…</div>' : "");
-    $("pdots").innerHTML = $("miniDots").innerHTML = list.slice(0, 5).map((x) => `<span style="background:${colorOf(x.name || "?")}">${x.id === host ? "<i>👑</i>" : ""}${esc((x.name || "?").trim().charAt(0).toUpperCase())}</span>`).join("");
+    $("pdots").innerHTML = $("miniDots").innerHTML = list.slice(0, 5).map((x) => {
+      const a = x.id === me ? myAvatar : x.avatar, svg = avSvg(a);
+      return svg ? `<span class="pic">${svg}</span>` : `<span style="background:${colorOf(x.name || "?")}">${esc((x.name || "?").trim().charAt(0).toUpperCase())}</span>`;
+    }).join("");
+    if ($("sheet").classList.contains("show") && !picking) renderSheet();
     $("miniNames").textContent = list.length <= 1 ? "Esperando o pessoal…" : list.map((x) => (x.id === me ? "você" : x.name)).join(", ");
     renderChat();
   }
+  // ---------- Quem está na sala (toque nas fotos) e trocar a própria foto ----------
+  let picking = false;
+  function renderSheet() {
+    const box = $("sheetBox");
+    if (picking) {
+      box.innerHTML = `<h2>Escolha sua foto</h2><div class="picks" id="roomPicks"></div><p class="hint"></p><button type="button" class="btn" id="sheetBack">Voltar</button>`;
+      renderPicks($("roomPicks"), () => { picking = false; heartbeat(); renderPeople(); renderSheet(); });
+      $("sheetBack").onclick = () => { picking = false; renderSheet(); };
+      return;
+    }
+    const list = online();
+    box.innerHTML = `<h2>Na sala agora</h2><div class="who">${list.map((x) => {
+      const isMe = x.id === me;
+      const inner = picHtml(x.name, isMe ? myAvatar : x.avatar).replace(/<\/span>$/, isMe ? '<span class="edit">✎</span></span>' : "</span>");
+      return `<button type="button" class="p ${isMe ? "me" : ""}" ${isMe ? 'id="sheetMe" aria-label="Trocar sua foto"' : "disabled"}>${inner}<div>${isMe ? "você" : esc(x.name || "?")}</div></button>`;
+    }).join("")}</div><p class="hint">Toque na sua foto para trocar</p><button type="button" class="btn" id="sheetClose">Fechar</button>`;
+    const mine = $("sheetMe");
+    if (mine) mine.onclick = () => { picking = true; renderSheet(); };
+    $("sheetClose").onclick = closeSheet;
+  }
+  function openSheet() { if (document.activeElement === $("text")) $("text").blur(); picking = false; renderSheet(); $("sheet").classList.add("show"); }
+  function closeSheet() { $("sheet").classList.remove("show"); picking = false; }
+  $("miniDots").addEventListener("click", openSheet);
+  $("miniNames").addEventListener("click", openSheet);
+  $("sheet").addEventListener("click", (e) => { if (e.target.id === "sheet") closeSheet(); });
+
   // Só fotos de verdade (nada de link escondido na mensagem).
   const validImg = (d) => typeof d === "string" && /^data:image\/(jpeg|png|webp);base64,/.test(d) && /^[A-Za-z0-9+/=]+$/.test(d.slice(d.indexOf(",") + 1));
   let renderedKeys = [];
@@ -583,7 +666,7 @@
   async function heartbeat() {
     try {
       const sent = Date.now();
-      const r = await api("PUT", `/people/${me}`, { name: myName, lastSeen: SV, platform: "web" });
+      const r = await api("PUT", `/people/${me}`, { name: myName, lastSeen: SV, platform: "web", avatar: myAvatar });
       const got = Date.now();
       if (r && r.lastSeen) offset = r.lastSeen - (sent + got) / 2;
       showConn(true);

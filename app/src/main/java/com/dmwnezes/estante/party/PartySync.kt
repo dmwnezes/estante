@@ -13,7 +13,7 @@ data class PlayState(
     val seq: Long = 0,
 )
 
-data class Person(val id: String, val name: String, val lastSeen: Long, val platform: String)
+data class Person(val id: String, val name: String, val lastSeen: Long, val platform: String, val avatar: String? = null)
 
 /** Emoji mandado na sala (sobe por cima do filme nos dois celulares). */
 data class Reaction(val id: String, val emoji: String, val name: String, val at: Long, val by: String)

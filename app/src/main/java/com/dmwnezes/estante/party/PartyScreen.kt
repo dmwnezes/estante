@@ -43,6 +43,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Image
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -129,6 +130,7 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
     var retry by remember { mutableIntStateOf(0) }
     var acceptIncompatible by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf(PartyConfig.name.ifBlank { AppGraph.auth.account.value.name?.substringBefore(' ').orEmpty() }) }
+    var avatar by remember { mutableStateOf(PartyConfig.avatar.ifBlank { Avatars.random() }) }
 
     val sub = remember(video.subtitle) { video.subtitle?.takeIf { it.startsWith("drive:") }?.removePrefix("drive:") }
     var sharing by remember { mutableStateOf(false) }
@@ -179,7 +181,7 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
         step = Step.CHECKING
         when {
             !PartyConfig.ready -> { step = Step.NOT_CONFIGURED; return@LaunchedEffect }
-            PartyConfig.name.isBlank() -> { step = Step.NEED_NAME; return@LaunchedEffect }
+            PartyConfig.name.isBlank() || Avatars.find(PartyConfig.avatar) == null -> { step = Step.NEED_NAME; return@LaunchedEffect }
             !acceptIncompatible && !PartySync.iphoneFriendly(video.fileName, null) -> { step = Step.INCOMPATIBLE; return@LaunchedEffect }
         }
         when (val c = PartyConfig.checkShared(video.ref)) {
@@ -206,7 +208,7 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
                 runCatching { DriveShare.makePublic(AppGraph.http, it.token, sub) }
             }
         }
-        val s = PartySession(PartyConfig.db(), PartySync.newCode(), PartyConfig.name)
+        val s = PartySession(PartyConfig.db(), PartySync.newCode(), PartyConfig.name, PartyConfig.avatar)
         runCatching {
             s.create(
                 RoomVideo(video.ref, video.title, PartyConfig.apiKey, sub, PartySync.roomMime(video.fileName)),
@@ -243,10 +245,16 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
                     ) { PillButton("Abrir Ajustes", null, onOpenSettings) }
                     Step.NEED_NAME -> {
                         Text("Como você quer aparecer na sala?", color = Cinema.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(16.dp))
+                        PersonPic(name, avatar, 84.dp)
                         Spacer(Modifier.height(14.dp))
                         OutlinedTextField(name, { name = it.take(24) }, singleLine = true, label = { Text("Seu nome") }, shape = Shapes.field, modifier = Modifier.fillMaxWidth())
                         Spacer(Modifier.height(14.dp))
-                        PillButton("Continuar", null, { PartyConfig.name = name; retry++ }, enabled = name.isNotBlank())
+                        Text("Escolha sua foto", color = Cinema.muted, fontSize = 13.sp)
+                        Spacer(Modifier.height(10.dp))
+                        AvatarPicker(avatar, { avatar = it }, size = 46.dp)
+                        Spacer(Modifier.height(18.dp))
+                        PillButton("Continuar", null, { PartyConfig.name = name; PartyConfig.avatar = avatar; retry++ }, enabled = name.isNotBlank())
                     }
                     Step.INCOMPATIBLE -> Info(
                         "Esse formato não toca no iPhone",
@@ -329,6 +337,8 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
     val error by session.error.collectAsState()
     var text by remember { mutableStateOf("") }
     var full by remember { mutableStateOf(false) }
+    var showPeople by remember { mutableStateOf(false) }
+    var myAvatar by remember { mutableStateOf(session.myAvatar) }
     var now by remember { mutableLongStateOf(session.serverNow()) }
     val systemLines = remember { mutableStateListOf<Line>() }
     var viewing by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
@@ -458,6 +468,13 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
     }
 
     viewing?.let { PhotoViewer(it) { viewing = null } }
+    if (showPeople) PeopleDialog(
+        people = people.filter { PartySync.online(it, now) }.map { if (it.id == session.me) it.copy(avatar = myAvatar) else it },
+        me = session.me,
+        myAvatar = myAvatar,
+        onPick = { key -> myAvatar = key; PartyConfig.avatar = key; session.setAvatar(key) },
+        onClose = { showPeople = false },
+    )
 
     Column(Modifier.fillMaxSize().then(if (full) Modifier else Modifier.statusBarsPadding().navigationBarsPadding().imePadding())) {
         // Filme (com o teclado aberto fica menor, para sobrar espaço ao chat)
@@ -489,12 +506,8 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
             // Teclado aberto: quem está na sala fica por cima do vídeo, no canto.
             if (imeVisible && !full) Row(Modifier.align(Alignment.BottomStart).padding(10.dp), horizontalArrangement = Arrangement.spacedBy((-8).dp)) {
                 onlineNow.take(5).forEach { p ->
-                    Box {
-                        Box(
-                            Modifier.size(30.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.6f)).padding(2.dp).clip(CircleShape).background(personColor(p.name)),
-                            contentAlignment = Alignment.Center,
-                        ) { Text(p.name.trim().take(1).uppercase().ifBlank { "?" }, color = Cinema.onAccent, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold) }
-                        if (p.id == host) Text("👑", fontSize = 10.sp, modifier = Modifier.align(Alignment.TopCenter).offset(y = (-9).dp))
+                    Box(Modifier.size(30.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.6f)).padding(2.dp)) {
+                        PersonPic(p.name, p.avatar, 26.dp)
                     }
                 }
             }
@@ -508,19 +521,16 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
                 .padding(start = 8.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy((-9).dp)) {
+            // Toque nas fotos (ou nos nomes): abre quem está na sala e deixa trocar a sua foto.
+            Row(horizontalArrangement = Arrangement.spacedBy((-9).dp), modifier = Modifier.clip(Shapes.pill).clickable { showPeople = true }) {
                 online.take(5).forEach { p ->
-                    Box {
-                        Box(
-                            Modifier.size(32.dp).clip(CircleShape).background(Cinema.surface).padding(2.dp).clip(CircleShape).background(personColor(p.name)),
-                            contentAlignment = Alignment.Center,
-                        ) { Text(p.name.trim().take(1).uppercase().ifBlank { "?" }, color = Cinema.onAccent, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold) }
-                        if (p.id == host) Text("👑", fontSize = 10.sp, modifier = Modifier.align(Alignment.TopCenter).offset(y = (-8).dp))
+                    Box(Modifier.size(32.dp).clip(CircleShape).background(Cinema.surface).padding(2.dp)) {
+                        PersonPic(p.name, p.avatar, 28.dp)
                     }
                 }
             }
             Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f).clickable { showPeople = true }) {
                 Text(
                     if (online.size <= 1) "Esperando alguém entrar…" else online.joinToString(", ") { if (it.id == session.me) "você" else it.name },
                     color = Cinema.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -611,25 +621,6 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
 }
 
 @Composable
-fun Avatar(p: Person, isHost: Boolean, isMe: Boolean) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(62.dp)) {
-        Box {
-            Box(
-                Modifier.size(50.dp).clip(CircleShape).background(personColor(p.name))
-                    .then(if (isMe) Modifier.border(2.dp, Color.White.copy(alpha = 0.7f), CircleShape) else Modifier),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(p.name.trim().take(1).uppercase().ifBlank { "?" }, color = Cinema.onAccent, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
-            }
-            if (isHost) Text("👑", fontSize = 15.sp, modifier = Modifier.align(Alignment.TopCenter).offset(y = (-12).dp))
-            Box(Modifier.align(Alignment.BottomEnd).size(14.dp).clip(CircleShape).background(Cinema.bgBottom).padding(2.dp).clip(CircleShape).background(Cinema.green))
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(if (isMe) "${p.name} (você)" else p.name, color = Cinema.text, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-    }
-}
-
-@Composable
 private fun Bubble(m: ChatMessage, mine: Boolean, onPhoto: (androidx.compose.ui.graphics.ImageBitmap) -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Column(
@@ -703,6 +694,55 @@ fun FloatingReactions(reactions: List<Reaction>, since: Long, serverNow: () -> L
                     Text(r.emoji, fontSize = 34.sp)
                     Text(r.name, color = Color.White, fontSize = 10.sp, modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 5.dp))
                 }
+            }
+        }
+    }
+}
+
+/** Quem está na sala; tocando na sua foto dá para trocar. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PeopleDialog(people: List<Person>, me: String, myAvatar: String?, onPick: (String) -> Unit, onClose: () -> Unit) {
+    var picking by remember { mutableStateOf(false) }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onClose) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Cinema.surface).padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(if (picking) "Escolha sua foto" else "Na sala agora", color = Cinema.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(16.dp))
+            if (picking) {
+                AvatarPicker(myAvatar, { onPick(it); picking = false }, size = 48.dp)
+                Spacer(Modifier.height(16.dp))
+                PillButton("Voltar", null, { picking = false }, filled = false)
+            } else {
+                androidx.compose.foundation.layout.FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    people.forEach { p ->
+                        val isMe = p.id == me
+                        Column(
+                            Modifier.width(76.dp).clip(RoundedCornerShape(16.dp)).then(if (isMe) Modifier.clickable { picking = true } else Modifier).padding(vertical = 4.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Box {
+                                PersonPic(p.name, p.avatar, 58.dp, if (isMe) Modifier.border(2.dp, Cinema.accent, CircleShape) else Modifier)
+                                if (isMe) Box(
+                                    Modifier.align(Alignment.BottomEnd).size(22.dp).clip(CircleShape).background(Cinema.accent),
+                                    contentAlignment = Alignment.Center,
+                                ) { Icon(Icons.Rounded.Edit, "Trocar foto", tint = Cinema.onAccent, modifier = Modifier.size(13.dp)) }
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Text(if (isMe) "você" else p.name, color = Cinema.text, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Text("Toque na sua foto para trocar", color = Cinema.muted, fontSize = 12.sp)
+                Spacer(Modifier.height(14.dp))
+                PillButton("Fechar", null, onClose, filled = false)
             }
         }
     }
