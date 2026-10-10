@@ -489,6 +489,18 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit, startN
         lastState = PlayState(playing, pos, session.serverNow(), session.me)
     }
 
+    /** Play que sai junto para todos depois de 3, 2, 1. */
+    fun playWithCountdown() {
+        suppressUntil = System.currentTimeMillis() + 900
+        player.playWhenReady = false
+        val pos = player.currentPosition / 1000.0
+        val at = session.serverNow() + PartySync.COUNTDOWN_MS
+        session.sendState(true, pos, at, countdown = true)
+        lastState = PlayState(true, pos, at, session.me)
+        countdownBy = ""
+        countdownAt = at
+    }
+
     fun applyRemote(st: PlayState) {
         lastState = st
         if (PartySync.inCountdown(st, session.serverNow())) {
@@ -521,12 +533,7 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit, startN
                     // A sala já está tocando: só alcança (contagem é para quando estava pausada).
                     val cur = lastState
                     if (cur != null && cur.playing) { applyRemote(cur); return }
-                    val pos = player.currentPosition / 1000.0
-                    val at = session.serverNow() + PartySync.COUNTDOWN_MS
-                    session.sendState(true, pos, at, countdown = true)
-                    lastState = PlayState(true, pos, at, session.me)
-                    countdownBy = ""
-                    countdownAt = at
+                    playWithCountdown()
                 } else {
                     countdownAt = 0
                     mine(false)
@@ -549,6 +556,51 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit, startN
 
     // O que os outros fazem chega aqui.
     LaunchedEffect(remote) { remote?.let { applyRemote(it) } }
+
+    // Travou (carregando) por mais de 10 s com a sala tocando: pausa a sala no meu ponto e,
+    // quando carregar, solta todo mundo com a contagem.
+    var myWaitSeq by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(Unit) {
+        var stallSince = 0L
+        while (true) {
+            delay(500)
+            val st = lastState ?: continue
+            val buffering = player.playbackState == Player.STATE_BUFFERING && player.playWhenReady
+            if (myWaitSeq == 0L) {
+                if (buffering && st.playing && countdownAt == 0L) {
+                    if (stallSince == 0L) stallSince = System.currentTimeMillis()
+                    if (System.currentTimeMillis() - stallSince > 10_000) {
+                        stallSince = 0
+                        suppressUntil = System.currentTimeMillis() + 900
+                        player.playWhenReady = false
+                        val pos = player.currentPosition / 1000.0
+                        val seq = session.sendState(false, pos, wait = session.myName)
+                        lastState = PlayState(false, pos, session.serverNow(), session.me, seq, session.myName)
+                        myWaitSeq = seq
+                    }
+                } else stallSince = 0
+            } else {
+                // Alguém mexeu na sala enquanto eu carregava: não insisto.
+                if (st.by != session.me || st.seq != myWaitSeq) { myWaitSeq = 0; continue }
+                if (player.playbackState == Player.STATE_READY && player.totalBufferedDuration >= 8_000) {
+                    myWaitSeq = 0
+                    playWithCountdown()
+                }
+            }
+        }
+    }
+
+    // Wi-Fi ↔ 4G: reabre a conexão com a sala na hora (sem esperar ela "morrer").
+    DisposableEffect(Unit) {
+        val cm = context.getSystemService(android.net.ConnectivityManager::class.java)
+        val since = System.currentTimeMillis()
+        val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+            // (o primeiro aviso chega logo ao registrar: esse não é troca de rede)
+            override fun onAvailable(network: android.net.Network) { if (System.currentTimeMillis() - since > 3_000) session.networkChanged() }
+        }
+        val ok = runCatching { cm?.registerDefaultNetworkCallback(cb) }.isSuccess
+        onDispose { if (ok) runCatching { cm?.unregisterNetworkCallback(cb) } }
+    }
 
     // Fim da contagem: começa a tocar (se ninguém pausou nesse meio-tempo).
     LaunchedEffect(countdownAt) {
@@ -653,6 +705,18 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit, startN
             }
             FloatingReactions(reactions, since = session.startedAt - 5_000, serverNow = { session.serverNow() })
             if (countdownAt > 0) Countdown(countdownAt, countdownBy) { session.serverNow() }
+            val waiting = lastState?.takeIf { !it.playing && it.wait != null }
+            if (waiting != null && countdownAt == 0L) Row(
+                Modifier.align(Alignment.TopCenter).padding(top = 10.dp).clip(Shapes.pill).background(Color(0xC80A071E)).padding(horizontal = 14.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = Cinema.accent)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (waiting.by == session.me) "Carregando… a sala está esperando você" else "Esperando ${waiting.wait} carregar…",
+                    color = Color.White, fontSize = 13.sp,
+                )
+            }
             // Teclado aberto: quem está na sala fica por cima do vídeo, no canto.
             if (imeVisible && !full) Row(Modifier.align(Alignment.BottomStart).padding(10.dp), horizontalArrangement = Arrangement.spacedBy((-8).dp)) {
                 onlineNow.take(5).forEach { p ->

@@ -141,21 +141,26 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
             }.sortedWith(compareBy({ it.at }, { it.id })).toList().takeLast(300)
         }
         t.optJSONObject("state")?.let { s ->
-            val st = PlayState(s.optBoolean("playing"), s.optDouble("position", 0.0), s.optLong("at"), s.optString("by"), s.optLong("seq"))
+            val st = PlayState(s.optBoolean("playing"), s.optDouble("position", 0.0), s.optLong("at"), s.optString("by"), s.optLong("seq"), s.optString("wait").takeIf { it.isNotBlank() })
             if (st.by != me && st != _remote.value) _remote.value = st
         }
     }
 
     /** Avisa a sala: play/pause/pulo feito aqui. */
-    fun sendState(playing: Boolean, positionSec: Double, at: Long = serverNow(), countdown: Boolean = false) {
+    fun sendState(playing: Boolean, positionSec: Double, at: Long = serverNow(), countdown: Boolean = false, wait: String? = null): Long {
         seq++
         val body = JSONObject().put("playing", playing).put("position", positionSec).put("at", at).put("by", me).put("seq", seq)
         if (countdown) body.put("cd", true)
+        if (wait != null) body.put("wait", wait)
         scope.launch { runCatching { db.put("$root/state", body) }.onFailure { _error.value = it.message } }
+        return seq
     }
 
     private fun meJson() = JSONObject().put("name", myName).put("lastSeen", SERVER_TIME).put("platform", "android")
         .apply { if (myAvatar.isNotBlank()) put("avatar", myAvatar) }
+
+    /** A rede do celular mudou: reconecta com a sala na hora. */
+    fun networkChanged() = db.reconnectNow()
 
     /** Troca o arquivo que o site toca (cópia nova do filme) e limpa os avisos de problema. */
     suspend fun switchFile(fileId: String) {

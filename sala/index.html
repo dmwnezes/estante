@@ -109,6 +109,11 @@
   .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: hop .9s infinite; }
   .dots i:nth-child(2) { animation-delay: .15s; } .dots i:nth-child(3) { animation-delay: .3s; }
   @keyframes hop { 0%, 60%, 100% { transform: none; opacity: .5 } 30% { transform: translateY(-4px); opacity: 1 } }
+  /* Sala esperando alguém carregar */
+  #waitPill { position: absolute; top: calc(10px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 4; display: none; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: rgba(10,7,30,.78); color: #fff; font-size: 13px; white-space: nowrap; pointer-events: none; }
+  #waitPill.on { display: flex; }
+  #waitPill i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg) } }
   /* Contagem regressiva antes do play */
   #countdown { position: absolute; inset: 0; z-index: 5; display: none; flex-direction: column; align-items: center; justify-content: center; background: rgba(10,7,30,.55); pointer-events: none; }
   #countdown.on { display: flex; }
@@ -207,6 +212,7 @@
     <video id="video" playsinline controls preload="metadata"></video>
     <div class="overlay" id="overlay"></div>
     <div id="floats"></div>
+    <div id="waitPill"><i></i><span id="waitText"></span></div>
     <div id="countdown"><b id="cdNum">3</b><span id="cdText">Começando junto…</span></div>
     <div id="pdots"></div>
   </div>
@@ -315,6 +321,7 @@
     if (!playing) stopCountdown();
     const s = { playing, position: video.currentTime, at: serverNow(), by: me, seq: Date.now() };
     lastState = s;
+    myWait = null; showWait();
     api("PUT", "/state", s).catch(() => showConn(false));
   }
   /** Pula para [t] segundos — ou guarda para quando o vídeo tiver carregado o começo. */
@@ -323,6 +330,7 @@
     if (video.readyState < 1) { pendingSeek = t; return; }
     if (Math.abs(video.currentTime - t) <= tolerance) return;
     mark("seek");
+    seekTarget = t;
     video.currentTime = t;
   }
   function doPlay() {
@@ -337,6 +345,7 @@
   function doPause() { if (!video.paused) { mark("pause"); video.pause(); } }
   function applyRemote(s) {
     lastState = s;
+    showWait();
     // Play com contagem (o "at" ainda está no futuro): espera parado no ponto certo e conta 3, 2, 1.
     if (s.playing && s.at - serverNow() > 300) { seekTo(s.position, 0.3); doPause(); runCountdown(s); return; }
     stopCountdown();
@@ -374,6 +383,7 @@
     mark("pause"); video.pause();
     const s = { playing: true, position: video.currentTime, at: serverNow() + 3000, by: me, seq: Date.now(), cd: true };
     lastState = s;
+    myWait = null; showWait();
     api("PUT", "/state", s).catch(() => showConn(false));
     runCountdown(s);
   }
@@ -392,8 +402,24 @@
     if (video.readyState < 1 || pendingSeek != null) { mark("pause"); video.pause(); return; }
     playWithCountdown();
   });
-  video.addEventListener("pause", () => { if (!consume("pause") && joined && !video.seeking && !video.ended && video.readyState > 0) sendState(false); });
-  video.addEventListener("seeked", () => { if (!consume("seek") && joined) sendState(!video.paused); });
+  // Tela bloqueada / app trocado: o iPhone pausa o vídeo sozinho — isso não pausa a sala.
+  // (o evento de pausa pode chegar um pouco antes de a página saber que ficou escondida: espera 0,6 s)
+  video.addEventListener("pause", () => {
+    stallSince = 0;
+    if (consume("pause") || !joined || video.seeking || video.ended || video.readyState === 0 || document.hidden) return;
+    setTimeout(() => { if (!document.hidden && video.paused && Date.now() - hiddenAt > 1500) sendState(false); }, 600);
+  });
+  let hiddenAt = 0;
+  document.addEventListener("visibilitychange", () => { if (document.hidden) hiddenAt = Date.now(); });
+  video.addEventListener("seeking", () => { stallSince = 0; });
+  // Pulo que a sala mandou: reconhece pelo destino (com internet lenta o "seeked" pode chegar
+  // bem depois dos 4 s da marca — e aí virava um "pulei" falso para todo mundo).
+  let seekTarget = null;
+  video.addEventListener("seeked", () => {
+    if (seekTarget != null && Math.abs(video.currentTime - seekTarget) < 2) { seekTarget = null; ignore.seek = 0; return; }
+    seekTarget = null;
+    if (!consume("seek") && joined) sendState(!video.paused);
+  });
   video.addEventListener("error", () => {
     // O Safari não abre MKV sozinho: se o arquivo for MKV, troca para o conversor do site.
     if (!mkv && !mkvProbed && roomVideo && video.error && video.error.code >= 3) { probeMkv(roomVideo); return; }
@@ -518,6 +544,47 @@
     if (buffering || video.readyState < 3 || Date.now() - lastFix < 10000) return;
     if (Math.abs(video.currentTime - expected(lastState)) > 1.5) { lastFix = Date.now(); seekTo(expected(lastState), 1.5); }
   }, 3000);
+
+  // ---------- Alguém travou: a sala pausa e espera ----------
+  // Quem trava por mais de 10 s pausa a sala no ponto onde parou; quando o filme carregou,
+  // a própria pessoa solta a sala com a contagem 3, 2, 1. Assim ninguém perde nada.
+  let myWait = null, stuckAt = 0, lastT = 0; // pausa automática que eu mandei (enquanto espero carregar)
+  function showWait() {
+    const s = lastState, pill = $("waitPill");
+    if (s && !s.playing && s.wait) {
+      $("waitText").textContent = s.by === me ? "Carregando… a sala está esperando você" : `Esperando ${s.wait} carregar…`;
+      pill.classList.add("on");
+    } else pill.classList.remove("on");
+  }
+  function loadedAhead(sec) {
+    const t = video.currentTime, b = video.buffered;
+    for (let i = 0; i < b.length; i++) if (b.start(i) <= t + 0.3 && b.end(i) >= Math.min(t + sec, (video.duration || 1e9) - 0.5)) return true;
+    return false;
+  }
+  setInterval(() => {
+    if (!joined || !lastState) return;
+    // 1) Travado com a sala tocando: pausa todo mundo no meu ponto.
+    // Travado = devia estar tocando, mas o tempo do vídeo não anda.
+    const moved = Math.abs(video.currentTime - lastT) > 0.05; lastT = video.currentTime;
+    const stuck = lastState.playing && !cdState && !video.paused && !moved && (video.seeking || video.readyState < 3);
+    if (!stuck) stuckAt = 0; else if (!stuckAt) stuckAt = Date.now();
+    if (!myWait && stuck && Date.now() - stuckAt > 10000) {
+      stuckAt = 0;
+      const s = { playing: false, position: video.currentTime, at: serverNow(), by: me, seq: Date.now(), wait: myName || "alguém" };
+      lastState = s; myWait = { seq: s.seq, since: Date.now() };
+      mark("pause"); video.pause();
+      api("PUT", "/state", s).catch(() => showConn(false));
+      showWait();
+      return;
+    }
+    // 2) Pausado esperando por mim: carregou uns segundos à frente → solta a sala com contagem.
+    if (myWait) {
+      if (lastState.seq !== myWait.seq) { myWait = null; showWait(); return; } // alguém mexeu: não insisto
+      if (video.readyState >= 3 && loadedAhead(8)) { myWait = null; playWithCountdown(); return; }
+      // Muito tempo sem carregar (vídeo normal): recarrega do ponto, continuando pausado.
+      if (!mkv && Date.now() - myWait.since > 30000 && !recovering) { myWait.since = Date.now(); recover("stall"); }
+    }
+  }, 500);
 
   // ---------- Travou / erro do Drive: descobre o motivo e se recupera sozinho ----------
   let buffering = false, stallSince = 0, recovering = false, retries = [], issueOpen = false;
@@ -877,12 +944,33 @@
     renderTyping();
   }
 
-  const es = new EventSource(`${ROOT}.json`);
-  es.addEventListener("put", (e) => { applyEvent("put", JSON.parse(e.data)); loaded = true; showConn(true); onTree(); });
-  es.addEventListener("patch", (e) => { applyEvent("patch", JSON.parse(e.data)); onTree(); });
-  es.addEventListener("cancel", () => showConn(false));
-  es.onerror = () => { showConn(false); if (!loaded) $("joinText").textContent = "Não consegui falar com a sala. Confira a internet."; };
-  es.onopen = () => showConn(true);
+  // ---------- Conexão com a sala (reconecta sozinha) ----------
+  // O Firebase manda um "keep-alive" de tempos em tempos. Se nada chegar por 90 s (tela bloqueada,
+  // troca de Wi-Fi para 4G…), a conexão morreu sem avisar: abre outra e alcança a sala.
+  let es = null, lastEventAt = Date.now(), resync = false;
+  function connect() {
+    if (es) try { es.close(); } catch (_) {}
+    lastEventAt = Date.now();
+    es = new EventSource(`${ROOT}.json`);
+    es.addEventListener("put", (e) => {
+      lastEventAt = Date.now();
+      const msg = JSON.parse(e.data);
+      // Reconexão: o primeiro "put" traz a sala inteira de novo — troca a cópia local.
+      if (msg.path === "/") tree = null;
+      applyEvent("put", msg); loaded = true; showConn(true);
+      if (msg.path === "/" && resync) { resync = false; lastRemoteKey = ""; }
+      onTree();
+    });
+    es.addEventListener("patch", (e) => { lastEventAt = Date.now(); applyEvent("patch", JSON.parse(e.data)); onTree(); });
+    es.addEventListener("keep-alive", () => { lastEventAt = Date.now(); });
+    es.addEventListener("cancel", () => showConn(false));
+    es.onerror = () => { showConn(false); if (!loaded) $("joinText").textContent = "Não consegui falar com a sala. Confira a internet."; };
+    es.onopen = () => { lastEventAt = Date.now(); showConn(true); };
+  }
+  function reconnect() { resync = true; connect(); if (joined) heartbeat(); }
+  connect();
+  setInterval(() => { if (Date.now() - lastEventAt > 90000) reconnect(); }, 5000);
+  addEventListener("online", () => { reconnect(); if (joined && roomVideo && !mkv && video.error) recover("online"); });
 
   async function heartbeat() {
     try {
@@ -981,7 +1069,14 @@
 
   addEventListener("pagehide", () => { if (joined) { api("DELETE", `/people/${me}`).catch(() => {}); api("DELETE", `/typing/${me}`).catch(() => {}); } });
   // Voltou para a aba: se reconecta e alcança a sala (sem reenviar nada).
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && joined) { heartbeat(); if (lastState && lastState.by !== me) applyRemote(lastState); } });
+  // Voltou (desbloqueou a tela, voltou para o Safari): reconecta se precisar e alcança a sala.
+  function cameBack() {
+    if (!joined) return;
+    if (Date.now() - lastEventAt > 15000) reconnect(); else heartbeat();
+    if (lastState) applyRemote(lastState);
+  }
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") cameBack(); });
+  addEventListener("pageshow", (e) => { if (e.persisted) cameBack(); });
 })();
 </script>
 </body>

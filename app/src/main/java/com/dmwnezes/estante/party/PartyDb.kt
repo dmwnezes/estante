@@ -29,9 +29,16 @@ class PartyDb(baseUrl: String, private val http: OkHttpClient) {
 
     private val base = baseUrl.trimEnd('/')
     private val json = "application/json; charset=utf-8".toMediaType()
-    private val streamHttp = http.newBuilder().readTimeout(Duration.ZERO).build()
+    // O Firebase manda um "keep-alive" de tempos em tempos: 2 min sem nada = conexão morta (troca de
+    // Wi-Fi para 4G, por exemplo) → derruba e reconecta, em vez de ficar esperando para sempre.
+    private val streamHttp = http.newBuilder().readTimeout(Duration.ofSeconds(120)).build()
 
     private fun url(path: String) = "$base/${path.trim('/')}.json"
+
+    @Volatile private var liveCall: okhttp3.Call? = null
+
+    /** A rede mudou (Wi-Fi ↔ 4G): derruba a conexão ao vivo para ela reabrir na hora. */
+    fun reconnectNow() { liveCall?.cancel() }
 
     private suspend fun send(method: String, path: String, body: Any?): Any? = withContext(Dispatchers.IO) {
         val rb = body?.let { (if (it is String) JSONObject.quote(it) else it.toString()).toRequestBody(json) }
@@ -58,7 +65,9 @@ class PartyDb(baseUrl: String, private val http: OkHttpClient) {
             while (isActive) {
                 runCatching {
                     val req = Request.Builder().url(url(path)).header("Accept", "text/event-stream").build()
-                    streamHttp.newCall(req).execute().use { resp ->
+                    val call = streamHttp.newCall(req)
+                    liveCall = call
+                    call.execute().use { resp ->
                         if (!resp.isSuccessful) throw IOException("stream ${resp.code}")
                         wait = 1000L
                         val source = resp.body?.source() ?: throw IOException("sem corpo")
@@ -76,7 +85,9 @@ class PartyDb(baseUrl: String, private val http: OkHttpClient) {
                     }
                 }
                 if (!isActive) break
-                delay(wait)
+                val cancelled = liveCall?.isCanceled() == true
+                liveCall = null
+                delay(if (cancelled) 300 else wait)
                 wait = (wait * 2).coerceAtMost(15_000)
             }
         }

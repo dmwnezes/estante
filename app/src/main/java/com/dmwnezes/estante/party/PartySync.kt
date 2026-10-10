@@ -11,6 +11,8 @@ data class PlayState(
     val at: Long,
     val by: String,
     val seq: Long = 0,
+    /** Pausa automática: nome de quem travou e a sala está esperando carregar. */
+    val wait: String? = null,
 )
 
 data class Person(val id: String, val name: String, val lastSeen: Long, val platform: String, val avatar: String? = null)
