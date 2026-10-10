@@ -32,6 +32,8 @@ class DriveAuth(context: Context) {
 
     companion object {
         const val SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+        /** Só para mudar o compartilhamento de um filme (pedido à parte, na primeira vez que precisar). */
+        const val SHARE_SCOPE = "https://www.googleapis.com/auth/drive"
         private const val TOKEN_LIFE_MS = 45 * 60 * 1000L
     }
 
@@ -85,6 +87,41 @@ class DriveAuth(context: Context) {
         _account.value = _account.value.copy(connected = true)
     }
 
+    // ---------- Permissão extra para compartilhar filmes pelo app ----------
+
+    /** Já autorizou compartilhar antes (então dá para tentar em silêncio, sem tela do Google). */
+    val shareGranted: Boolean get() = prefs.getBoolean("shareGranted", false)
+
+    private fun shareRequest() = AuthorizationRequest.builder()
+        .setRequestedScopes(listOf(Scope(SCOPE), Scope(SHARE_SCOPE)))
+        .build()
+
+    /** Resultado do pedido: ou a tela do Google precisa abrir, ou já veio o token. */
+    sealed interface ShareAuth {
+        class NeedsScreen(val intent: PendingIntent) : ShareAuth
+        class Token(val token: String) : ShareAuth
+    }
+
+    suspend fun beginShare(): ShareAuth {
+        val r = client.authorize(shareRequest()).await()
+        if (r.hasResolution()) return ShareAuth.NeedsScreen(r.pendingIntent!!)
+        return ShareAuth.Token(shareToken(r.grantedScopes, r.accessToken))
+    }
+
+    fun finishShare(data: Intent?): String {
+        val r = client.getAuthorizationResultFromIntent(data)
+        return shareToken(r.grantedScopes, r.accessToken)
+    }
+
+    private fun shareToken(granted: List<String>?, token: String?): String {
+        if (granted != null && granted.isNotEmpty() && SHARE_SCOPE !in granted) throw MissingShareScopeException()
+        if (token.isNullOrBlank()) error("O Google não devolveu permissão")
+        prefs.edit().putBoolean("shareGranted", true).apply()
+        return token
+    }
+
+    class MissingShareScopeException : IllegalStateException("Permissão de compartilhar não marcada")
+
     fun setProfile(email: String?, name: String?) {
         prefs.edit().putString("email", email).putString("name", name).apply()
         _account.value = _account.value.copy(email = email, name = name)
@@ -120,6 +157,7 @@ class DriveAuth(context: Context) {
 
     /** Mensagem amigável para os erros mais comuns do login. */
     fun explain(e: Throwable): String {
+        if (e is MissingShareScopeException) return "A caixa “ver, editar, criar e excluir arquivos do Google Drive” ficou desmarcada. Toque de novo e marque essa opção — o app só usa para mudar o compartilhamento do filme."
         if (e is MissingScopeException) return "A caixa de permissão do Google Drive ficou desmarcada. Toque em Conectar de novo e marque a opção do Drive na tela do Google."
         val code = (e as? ApiException)?.statusCode
         return when (code) {

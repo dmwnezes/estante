@@ -1,5 +1,6 @@
 package com.dmwnezes.estante.party
 
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.net.Uri
@@ -44,6 +45,7 @@ import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Image
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.CircularProgressIndicator
@@ -94,6 +96,8 @@ import androidx.media3.ui.PlayerView
 import com.dmwnezes.estante.AppGraph
 import com.dmwnezes.estante.data.Resume
 import com.dmwnezes.estante.data.Video
+import com.dmwnezes.estante.drive.DriveAuth
+import com.dmwnezes.estante.drive.DriveShare
 import com.dmwnezes.estante.player.findActivity
 import com.dmwnezes.estante.player.playUri
 import com.dmwnezes.estante.ui.Cinema
@@ -126,6 +130,51 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
     var acceptIncompatible by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf(PartyConfig.name.ifBlank { AppGraph.auth.account.value.name?.substringBefore(' ').orEmpty() }) }
 
+    val sub = remember(video.subtitle) { video.subtitle?.takeIf { it.startsWith("drive:") }?.removePrefix("drive:") }
+    var sharing by remember { mutableStateOf(false) }
+    var shareError by remember { mutableStateOf<String?>(null) }
+    var autoShareTried by remember { mutableStateOf(false) }
+
+    /** Compartilha o filme (e a legenda) e espera o Google liberar para a chave do site. Devolve o erro, se houver. */
+    suspend fun shareFiles(token: String): String? = runCatching {
+        DriveShare.makePublic(AppGraph.http, token, video.ref)
+        sub?.let { runCatching { DriveShare.makePublic(AppGraph.http, token, it) } }
+        repeat(6) {
+            if (PartyConfig.checkShared(video.ref) == ShareCheck.Ok) return@runCatching null
+            delay(1_200)
+        }
+        null
+    }.getOrElse { DriveShare.explain(it) }
+
+    val shareConsent = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { res ->
+        if (res.resultCode != Activity.RESULT_OK) { sharing = false; shareError = "Você fechou a tela do Google antes de permitir."; return@rememberLauncherForActivityResult }
+        scope.launch {
+            val err = runCatching { AppGraph.auth.finishShare(res.data) }.fold({ shareFiles(it) }, { AppGraph.auth.explain(it) })
+            sharing = false
+            shareError = err
+            if (err == null) retry++
+        }
+    }
+    fun startShare() {
+        sharing = true
+        shareError = null
+        scope.launch {
+            runCatching { AppGraph.auth.beginShare() }.onSuccess { r ->
+                when (r) {
+                    is DriveAuth.ShareAuth.NeedsScreen ->
+                        runCatching { shareConsent.launch(IntentSenderRequest.Builder(r.intent.intentSender).build()) }
+                            .onFailure { sharing = false; shareError = "Não consegui abrir a tela do Google." }
+                    is DriveAuth.ShareAuth.Token -> {
+                        val err = shareFiles(r.token)
+                        sharing = false
+                        shareError = err
+                        if (err == null) retry++
+                    }
+                }
+            }.onFailure { sharing = false; shareError = AppGraph.auth.explain(it) }
+        }
+    }
+
     LaunchedEffect(retry, acceptIncompatible) {
         step = Step.CHECKING
         when {
@@ -134,13 +183,30 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
             !acceptIncompatible && !PartySync.iphoneFriendly(video.fileName, null) -> { step = Step.INCOMPATIBLE; return@LaunchedEffect }
         }
         when (val c = PartyConfig.checkShared(video.ref)) {
-            ShareCheck.NotShared -> { step = Step.NOT_SHARED; return@LaunchedEffect }
+            ShareCheck.NotShared -> {
+                // Já deu a permissão antes: o app compartilha sozinho, sem perguntar de novo.
+                if (AppGraph.auth.shareGranted && !autoShareTried) {
+                    autoShareTried = true
+                    val r = runCatching { AppGraph.auth.beginShare() }.getOrNull()
+                    if (r is DriveAuth.ShareAuth.Token) {
+                        val err = shareFiles(r.token)
+                        if (err == null) { retry++; return@LaunchedEffect }
+                        shareError = err
+                    }
+                }
+                step = Step.NOT_SHARED; return@LaunchedEffect
+            }
             ShareCheck.BadKey -> { step = Step.BAD_KEY; return@LaunchedEffect }
             is ShareCheck.Failed -> { failMsg = c.message; step = Step.FAILED; return@LaunchedEffect }
             ShareCheck.Ok -> {}
         }
+        // A legenda também precisa estar liberada (senão o site fica sem ela, sem avisar).
+        if (sub != null && AppGraph.auth.shareGranted && PartyConfig.checkShared(sub) == ShareCheck.NotShared) {
+            (runCatching { AppGraph.auth.beginShare() }.getOrNull() as? DriveAuth.ShareAuth.Token)?.let {
+                runCatching { DriveShare.makePublic(AppGraph.http, it.token, sub) }
+            }
+        }
         val s = PartySession(PartyConfig.db(), PartySync.newCode(), PartyConfig.name)
-        val sub = video.subtitle?.takeIf { it.startsWith("drive:") }?.removePrefix("drive:")
         runCatching {
             s.create(
                 RoomVideo(video.ref, video.title, PartyConfig.apiKey, sub, PartySync.roomMime(video.fileName)),
@@ -190,13 +256,25 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
                     }
                     Step.NOT_SHARED -> Info(
                         "O filme ainda não está compartilhado",
-                        "O iPhone dela não entra na sua conta do Google. No Drive, compartilhe o filme (ou a pasta inteira de filmes, assim vale para todos) como “Qualquer pessoa com o link · Leitor”. Depois volte aqui.",
+                        "O celular dela não entra na sua conta do Google, então o filme precisa estar como “Qualquer pessoa com o link · Leitor”. O app pode fazer isso por você (na primeira vez o Google pede sua permissão; depois é automático).",
                     ) {
-                        PillButton("Abrir no Drive", null, {
-                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://drive.google.com/file/d/${video.ref}/view"))) }
-                        })
-                        Spacer(Modifier.height(10.dp))
-                        PillButton("Já compartilhei, tentar de novo", null, { retry++ }, filled = false)
+                        if (sharing) {
+                            CircularProgressIndicator(color = Cinema.accent)
+                            Spacer(Modifier.height(10.dp))
+                            Text("Compartilhando…", color = Cinema.muted)
+                        } else {
+                            shareError?.let {
+                                Text(it, color = Cinema.yellow, fontSize = 14.sp, textAlign = TextAlign.Center)
+                                Spacer(Modifier.height(14.dp))
+                            }
+                            PillButton("Compartilhar pelo app", Icons.Rounded.Share, { startShare() }, Modifier.fillMaxWidth())
+                            Spacer(Modifier.height(10.dp))
+                            PillButton("Abrir no Drive", null, {
+                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://drive.google.com/file/d/${video.ref}/view"))) }
+                            }, Modifier.fillMaxWidth(), filled = false)
+                            Spacer(Modifier.height(10.dp))
+                            PillButton("Já compartilhei, tentar de novo", null, { retry++ }, Modifier.fillMaxWidth(), filled = false)
+                        }
                     }
                     Step.BAD_KEY -> Info(
                         "A chave do Google não funcionou",

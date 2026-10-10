@@ -468,6 +468,9 @@
   function fullbox(type, version, flags, ...parts) { return box(type, [version].concat(u24(flags)), ...parts); }
   const ZERO = (n) => new Array(n).fill(0);
 
+  /** hvcC sem VPS/SPS/PPS (vêm dentro dos quadros) = "hev1"; com eles = "hvc1". */
+  function hevcTag(t) { return t.priv && t.priv.length > 22 && t.priv[22] > 0 ? "hvc1" : "hev1"; }
+
   /** "mp4a.40.2", "avc1.64001f"… — o texto que o MediaSource precisa para saber o formato. */
   function codecString(t) {
     const p = t.priv;
@@ -477,7 +480,7 @@
         const space = p[1] >> 6, tier = (p[1] >> 5) & 1, profile = p[1] & 31;
         let compat = uint(p, 2, 4), rev = 0;
         for (let i = 0; i < 32; i++) { rev = (rev << 1) | (compat & 1); compat >>>= 1; }
-        let s = "hvc1." + ["", "A", "B", "C"][space] + profile + "." + (rev >>> 0).toString(16) + "." + (tier ? "H" : "L") + p[12];
+        let s = hevcTag(t) + "." + ["", "A", "B", "C"][space] + profile + "." + (rev >>> 0).toString(16) + "." + (tier ? "H" : "L") + p[12];
         const cons = Array.from(p.subarray(6, 12));
         while (cons.length && cons[cons.length - 1] === 0) cons.pop();
         for (const c of cons) s += "." + c.toString(16);
@@ -542,7 +545,7 @@
       const w = t.width || 640, h = t.height || 360;
       const visual = [].concat(ZERO(6), u16(1), ZERO(16), u16(w), u16(h), u32(0x00480000), u32(0x00480000), u32(0), u16(1), ZERO(32), u16(0x18), u16(0xffff));
       if (t.kind === "avc") return box("avc1", visual, box("avcC", t.priv));
-      if (t.kind === "hevc") return box("hvc1", visual, box("hvcC", t.priv));
+      if (t.kind === "hevc") return box(hevcTag(t), visual, box("hvcC", t.priv));
       if (t.kind === "vp9") return box("vp09", visual, fullbox("vpcC", 1, 0, [0, 10, (8 << 4) | (1 << 1), 2, 2, 2].concat(u16(0))));
     }
     const ch = t.channels || 2;
@@ -667,14 +670,14 @@
       const sorted = raw.slice().sort((a, b) => a - b);
       const pts = raw.map((x) => x + sh);
       let lastDts = this.last.has(t.id) ? this.last.get(t.id) : null;
-      const dts = sorted.map((d) => { if (lastDts != null && d <= lastDts) d = lastDts + 1; lastDts = d; return d; });
+      const dts = sorted.map((d) => { if (d < 0) d = 0; if (lastDts != null && d <= lastDts) d = lastDts + 1; lastDts = d; return d; });
       const typical = t.defaultDuration ? Math.round(t.defaultDuration * ts) : (dts.length > 1 ? Math.round((dts[dts.length - 1] - dts[0]) / (dts.length - 1)) : 3750);
       this.last.set(t.id, dts[dts.length - 1]);
       const samples = fs.map((f, i) => ({
         dur: i < fs.length - 1 ? Math.max(1, dts[i + 1] - dts[i]) : Math.max(1, typical),
         size: f.data.length,
         flags: f.key ? 0x02000000 : 0x01010000,
-        cts: pts[i] - dts[i],
+        cts: Math.max(pts[i], 0) - dts[i],
       }));
       return { id: t.id, base: dts[0], samples, data: fs.map((f) => f.data) };
     }
@@ -682,7 +685,10 @@
     audioSamples(t, fs) {
       const ts = t.ts;
       let base = Math.round((fs[0].pts + (this.shift || 0)) * ts);
-      if (this.last.has(t.id) && base < this.last.get(t.id) && this.last.get(t.id) - base < ts / 4) base = this.last.get(t.id);
+      // Emenda com o pedaço anterior: o MKV guarda o tempo arredondado em milissegundos, e um
+      // buraco/sobreposição minúsculo entre pedaços vira estalo ou trava no Safari.
+      if (this.last.has(t.id) && Math.abs(base - this.last.get(t.id)) < ts / 20) base = this.last.get(t.id);
+      if (base < 0) base = 0;
       const samples = fs.map((f, i) => {
         let dur = t.frameDur;
         if (!dur) dur = i < fs.length - 1 ? Math.max(1, Math.round((fs[i + 1].pts - f.pts) * ts)) : Math.max(1, Math.round((f.dur || 0.02) * ts));
@@ -733,11 +739,14 @@
     opts = opts || {};
     const MS = root.ManagedMediaSource || root.MediaSource;
     const managed = !!root.ManagedMediaSource && MS === root.ManagedMediaSource;
-    const fail = (m) => { if (opts.onError) opts.onError(m); };
+    // transient = problema passageiro (o player continua tentando sozinho).
+    const fail = (m, transient) => { if (!destroyed && opts.onError) opts.onError(m, !!transient); };
+    const recovered = () => { if (!destroyed && opts.onRecover) opts.onRecover(); };
     if (!MS) { fail("Este navegador não consegue tocar MKV (no iPhone, precisa do iOS 17.1 ou mais novo)."); return null; }
 
+    let watchdog = 0, stuckSince = 0, appendedUntil = 0;
     let destroyed = false, gen = 0, nextPos = -1, file = null, mux = null, sb = null, streaming = true, ended = false;
-    let subTrack = null, chosen = null;
+    let subTrack = null, chosen = null, pre = null, failing = false;
     const queue = [];
     const ms = new MS();
     if (managed) video.disableRemotePlayback = true;
@@ -755,8 +764,7 @@
       for (let attempt = 0; ; attempt++) {
         try {
           const r = await fetch(url, { headers: { Range: `bytes=${a}-${b}` } });
-          if (r.status === 403 || r.status === 404) throw Object.assign(new Error("perm"), { fatal: true, status: r.status });
-          if (!r.ok) throw new Error("HTTP " + r.status);
+          if (!r.ok) throw await httpError(r);
           const buf = new Uint8Array(await r.arrayBuffer());
           // Servidor que ignorou o Range: recorta.
           if (r.status === 200 && buf.length > b - a + 1) return buf.subarray(a, b + 1);
@@ -771,10 +779,27 @@
     async function getSize() {
       if (opts.size) return opts.size;
       const r = await fetch(url, { headers: { Range: "bytes=0-0" } });
+      if (!r.ok) throw await httpError(r);
       const cr = r.headers.get("Content-Range");
       if (cr && /\/(\d+)$/.test(cr)) return +RegExp.$1;
       if (opts.sizeUrl) { const j = await (await fetch(opts.sizeUrl)).json(); if (j && j.size) return +j.size; }
       throw new Error("Não consegui saber o tamanho do arquivo.");
+    }
+
+    /** Erro HTTP do Drive → mensagem certa. Cota e "muitos pedidos" são passageiros. */
+    async function httpError(r) {
+      let reason = "";
+      try { const j = await r.json(); reason = (j.error && ((j.error.errors && j.error.errors[0] && j.error.errors[0].reason) || j.error.status)) || ""; } catch (_) {}
+      const e = new Error("HTTP " + r.status + (reason ? " " + reason : ""));
+      e.status = r.status; e.reason = reason;
+      if (r.status === 429 || /rateLimit/i.test(reason) || r.status >= 500) return e; // tenta de novo
+      e.fatal = true;
+      if (r.status === 404 || /notFound|forbidden|insufficient/i.test(reason) || (r.status === 403 && !reason)) e.msg = NOT_SHARED;
+      else if (/downloadQuotaExceeded/i.test(reason)) e.msg = "O Google bloqueou downloads desse filme por hoje (muita gente baixou o mesmo arquivo em 24 h). Tente amanhã ou faça uma cópia do arquivo no Drive.";
+      else if (/keyInvalid|API_KEY|referer|blocked/i.test(reason)) e.msg = "A chave do Google usada pela sala não funcionou. Confira em Ajustes › Assistir junto no app.";
+      else if (/cannotDownloadAbusiveFile|abusive/i.test(reason)) e.msg = "O Google marcou esse arquivo como suspeito e não deixa baixar pela chave do site.";
+      else e.msg = "O Drive recusou o filme (" + r.status + (reason ? ", " + reason : "") + ").";
+      return e;
     }
 
     function bufferedAhead() {
@@ -842,16 +867,28 @@
           continue;
         }
         let cl;
-        try { cl = await file.cluster(nextPos); }
+        try {
+          // O próximo pedaço já vem baixando enquanto este é entregue ao navegador.
+          const p = pre && pre.pos === nextPos ? pre.promise : file.cluster(nextPos);
+          pre = null;
+          cl = await p;
+        }
         catch (e) {
           if (my !== gen || destroyed) return;
-          fail(e.fatal ? "O Drive não liberou o filme (ele precisa estar compartilhado como “qualquer pessoa com o link”)." : "A conexão caiu enquanto carregava o filme. Tentando de novo…");
-          if (e.fatal) return;
+          if (e.fatal) { fail(e.msg || NOT_SHARED); return; }
+          failing = true;
+          fail("A conexão caiu enquanto carregava o filme. Tentando de novo…", true);
           await sleep(2000);
           continue;
         }
         if (my !== gen || destroyed) return;
+        if (failing) { failing = false; recovered(); }
         nextPos = cl.next;
+        if (nextPos >= 0 && nextPos < file.segEnd && cl.frames.length) {
+          const pp = file.cluster(nextPos);
+          pp.catch(() => {});
+          pre = { pos: nextPos, promise: pp };
+        }
         if (!cl.frames.length) continue;
         const media = cl.frames.filter((f) => chosen.ids.has(f.track));
         const frag = mux.fragment(media);
@@ -860,6 +897,7 @@
         try { if (!(await append(frag, my))) return; }
         catch (e) { if (my === gen && !destroyed) fail("O navegador recusou um pedaço do filme (" + e.name + ")."); return; }
         ended = false;
+        appendedUntil = Math.max(appendedUntil, media.reduce((m, f) => Math.max(m, f.pts), 0) + (mux.shift || 0));
         if (!managed || !streaming) await evict(false);
       }
     }
@@ -882,10 +920,16 @@
     }
 
     function onSeeking() {
-      if (!file || destroyed) return;
+      if (!file || !mux || destroyed) return;
+      if (isBuffered(video.currentTime)) return;
+      reposition();
+    }
+    /** Recomeça a baixar a partir do ponto atual (pulo, ou o navegador jogou fora o que tinha). */
+    function reposition() {
       const t = video.currentTime;
-      if (isBuffered(t)) return;
       gen++;
+      pre = null;
+      appendedUntil = 0;
       const target = file.clusterFor(t - ((mux && mux.shift) || 0));
       nextPos = target.pos;
       mux.reset();
@@ -929,6 +973,16 @@
           textTrack.mode = "showing";
         }
         video.addEventListener("seeking", onSeeking);
+        // Vigia: se o vídeo está parado esperando dados que já "passaram" (o navegador descartou
+        // um trecho para economizar memória), volta a baixar dali.
+        watchdog = setInterval(() => {
+          if (destroyed || video.paused || video.seeking || video.ended || !mux) { stuckSince = 0; return; }
+          const end = video.duration || file.duration;
+          // Só é buraco se já entregamos dados além deste ponto (senão é só a internet carregando).
+          if (isBuffered(video.currentTime) || appendedUntil < video.currentTime + 1 || (end && video.currentTime > end - 1)) { stuckSince = 0; return; }
+          if (!stuckSince) { stuckSince = Date.now(); return; }
+          if (Date.now() - stuckSince > 2500) { stuckSince = 0; reposition(); }
+        }, 1000);
         // Começa do ponto onde o vídeo já está (a sala pode ter pedido um pulo antes).
         const t0 = video.currentTime;
         nextPos = t0 > 1 ? file.clusterFor(t0).pos : file.firstCluster;
@@ -940,19 +994,24 @@
         }
         pump(gen);
       } catch (e) {
-        fail(e && e.fatal ? "O Drive não liberou o filme (ele precisa estar compartilhado como “qualquer pessoa com o link”)." : "Não consegui abrir este MKV: " + (e && e.message ? e.message : e));
+        if (destroyed) return;
+        fail(e && e.fatal ? (e.msg || NOT_SHARED) : "Não consegui abrir este MKV: " + (e && e.message ? e.message : e));
       }
     }, { once: true });
 
     return {
       destroy() {
         destroyed = true; gen++;
+        clearInterval(watchdog);
         video.removeEventListener("seeking", onSeeking);
+        if (textTrack) { try { textTrack.mode = "disabled"; } catch (_) {} }
         if (objUrl) URL.revokeObjectURL(objUrl);
       },
       get file() { return file; },
     };
   }
+
+  const NOT_SHARED = "O Drive não liberou o filme (ele precisa estar compartilhado como “qualquer pessoa com o link”).";
 
   function sleep(ms2) { return new Promise((r) => setTimeout(r, ms2)); }
 

@@ -73,4 +73,12 @@ class PartyTest {
         assertFalse(com.dmwnezes.estante.party.ChatImages.isValid("https://exemplo.com/a.jpg"))
         assertFalse(com.dmwnezes.estante.party.ChatImages.isValid(null))
     }
+
+    @Test
+    fun shareErrorsExplained() {
+        fun err(reason: String) = com.dmwnezes.estante.drive.DriveApiException.from(403, """{"error":{"code":403,"message":"x","errors":[{"reason":"$reason"}]}}""")
+        assertTrue(com.dmwnezes.estante.drive.DriveShare.explain(err("insufficientFilePermissions")).contains("dono"))
+        assertTrue(com.dmwnezes.estante.drive.DriveShare.explain(err("publishOutNotPermitted")).contains("empresa"))
+        assertTrue(com.dmwnezes.estante.drive.DriveShare.explain(err("insufficientPermissions")).contains("permissão"))
+    }
 }

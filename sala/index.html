@@ -275,50 +275,57 @@
     if (lastState) seekTo(expected(lastState), 0.3);
   });
   video.addEventListener("play", () => { if (!consume("play") && joined) sendState(true); });
-  video.addEventListener("pause", () => { if (!consume("pause") && joined && !video.seeking && !video.ended) sendState(false); });
+  video.addEventListener("pause", () => { if (!consume("pause") && joined && !video.seeking && !video.ended && video.readyState > 0) sendState(false); });
   video.addEventListener("seeked", () => { if (!consume("seek") && joined) sendState(!video.paused); });
   video.addEventListener("error", () => {
     // O Safari não abre MKV sozinho: se o arquivo for MKV, troca para o conversor do site.
-    if (!mkvTried && roomVideo && video.error && video.error.code >= 3) { probeMkv(roomVideo); return; }
+    if (!mkv && !mkvProbed && roomVideo && video.error && video.error.code >= 3) { probeMkv(roomVideo); return; }
     showVideoError();
   });
 
   // ---------- Fonte do vídeo (direto do Drive, ou MKV convertido na hora) ----------
-  let roomVideo = null, mkv = null, mkvTried = false;
+  // useMkv: confirmado que o arquivo é MKV. mkvProbed: já olhamos os primeiros bytes uma vez.
+  let roomVideo = null, mkv = null, useMkv = false, mkvProbed = false, lastNote = "";
   const driveUrl = (v) => `https://www.googleapis.com/drive/v3/files/${v.fileId}?alt=media&supportsAllDrives=true&key=${v.key}`;
   const isMkv = (v) => /matroska/i.test(v.mime || "") || /\.mkv$/i.test(v.name || "");
   const canMse = () => !!(window.ManagedMediaSource || window.MediaSource) && !!window.EstanteMkv;
-  function note(text) { systemLines.push({ at: serverNow(), text }); renderChat(); }
+  /** Aviso discreto no chat (sem repetir o mesmo seguido). */
+  function note(text) { if (text === lastNote) return; lastNote = text; systemLines.push({ at: serverNow(), text }); renderChat(); }
+  const OLD_IOS = "Este navegador não consegue tocar MKV. No iPhone, precisa do iOS 17.1 ou mais novo (Ajustes › Geral › Atualização de Software).";
   function startSource(v) {
     roomVideo = v;
+    // Trocar a fonte pausa o vídeo sozinho; isso não pode virar "pausou" para a sala.
+    if (!video.paused) mark("pause");
     if (mkv) { mkv.destroy(); mkv = null; }
-    if ((isMkv(v) || mkvTried) && canMse()) startMkv(v);
-    else { video.removeAttribute("src"); video.src = driveUrl(v); }
+    if (isMkv(v) || useMkv) startMkv(v);
+    else { video.srcObject = null; video.src = driveUrl(v); }
   }
   function startMkv(v) {
-    mkvTried = true;
-    if (mkv) mkv.destroy();
+    useMkv = true;
+    if (!video.paused) mark("pause");
+    if (mkv) { mkv.destroy(); mkv = null; }
+    if (!canMse()) { overlay(OLD_IOS, "Tentar de novo", () => { hideOverlay(); retrySource(); }); return; }
     mkv = EstanteMkv.MkvPlayer(video, driveUrl(v), {
       sizeUrl: `https://www.googleapis.com/drive/v3/files/${v.fileId}?fields=size&supportsAllDrives=true&key=${v.key}`,
-      onError: (msg) => overlay(msg, "Tentar de novo", () => { hideOverlay(); retrySource(); }),
+      // Problema passageiro (internet): só avisa no chat; o player tenta sozinho.
+      onError: (msg, transient) => transient ? note(msg) : overlay(msg, "Tentar de novo", () => { hideOverlay(); retrySource(); }),
+      onRecover: () => note("Conexão de volta, o filme continua carregando."),
       onInfo: note,
       subtitles: !v.subtitleId,
     });
-    if (!mkv) {
-      overlay("Este navegador não consegue tocar MKV. No iPhone, precisa do iOS 17.1 ou mais novo (Ajustes › Geral › Atualização de Software).", "Tentar de novo", () => { hideOverlay(); retrySource(); });
-    }
+    if (!mkv) overlay(OLD_IOS, "Tentar de novo", () => { hideOverlay(); retrySource(); });
   }
   /** O arquivo veio sem nome (sala antiga): olha os primeiros bytes para ver se é MKV. */
   async function probeMkv(v) {
-    mkvTried = true;
+    mkvProbed = true;
     try {
-      if (!canMse()) throw 0;
       const r = await fetch(driveUrl(v), { headers: { Range: "bytes=0-3" } });
       if (!r.ok) throw 0;
       const b = new Uint8Array(await r.arrayBuffer());
       if (!EstanteMkv.looksLikeMkv(b)) throw 0;
     } catch (_) { showVideoError(); return; }
     startMkv(v);
+    if (!mkv) return;
     if (lastState) { pendingSeek = expected(lastState); if (lastState.playing) doPlay(); }
   }
   function retrySource() {
