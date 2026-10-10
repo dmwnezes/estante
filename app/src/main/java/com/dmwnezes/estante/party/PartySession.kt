@@ -159,7 +159,8 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
 
     /** Troca o arquivo que o site toca (cópia nova do filme) e limpa os avisos de problema. */
     suspend fun switchFile(fileId: String) {
-        db.put("$root/video/fileId", fileId)
+        // "rev" muda sempre: mesmo voltando ao mesmo arquivo, o site recarrega.
+        db.patch("$root/video", JSONObject().put("fileId", fileId).put("rev", SERVER_TIME))
         runCatching { db.delete("$root/issues") }
     }
 

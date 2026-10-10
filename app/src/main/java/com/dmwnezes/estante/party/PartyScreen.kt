@@ -387,24 +387,44 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
     val issues by session.issues.collectAsState()
     val roomVideoNow by session.roomVideo.collectAsState()
     val lastIssue = issues.filter { it.fileId.isBlank() || it.fileId == roomVideoNow?.fileId }.maxByOrNull { it.at }
-    // O site nem sempre consegue ler o motivo do erro; o app confere direto no Drive.
-    val blockedIssue by androidx.compose.runtime.produceState<Issue?>(null, lastIssue?.id, lastIssue?.at, roomVideoNow?.fileId) {
+    // O site avisou que o filme parou; o app confere direto no Drive o que houve.
+    val brokenIssue by androidx.compose.runtime.produceState<Pair<Issue, Boolean>?>(null, lastIssue?.id, lastIssue?.at, roomVideoNow?.fileId) {
         val i = lastIssue
+        if (i == null) { value = null; return@produceState }
+        val f = roomVideoNow?.fileId ?: video.ref
+        val shared = PartyConfig.checkShared(f)
+        val down = if (shared == ShareCheck.Ok) PartyConfig.checkDownload(f) else shared
         value = when {
-            i == null -> null
-            i.blocked -> i
-            PartyConfig.checkDownload(roomVideoNow?.fileId ?: video.ref) is ShareCheck.Blocked -> i
+            shared == ShareCheck.NotShared || down == ShareCheck.NotShared -> i to false // não compartilhado / foi para a lixeira
+            down is ShareCheck.Blocked || i.blocked -> i to true                        // limite de downloads
             else -> null
         }
     }
+    val blockedIssue = brokenIssue?.first
     var fixing by remember { mutableStateOf(false) }
     var fixMsg by remember { mutableStateOf<String?>(null) }
     var autoFixes by remember { mutableIntStateOf(0) }
+    /**
+     * Destrava o filme para o site: se o original funciona pelo link, volta para ele (liberando o
+     * compartilhamento se preciso); se o Google bloqueou, faz uma cópia nova.
+     */
     suspend fun fixWith(token: String) {
         fixing = true
         fixMsg = null
-        runCatching { session.switchFile(PartyFix.freshCopy(token, video)) }
-            .onSuccess { systemLines += Line("fix-${System.currentTimeMillis()}", session.serverNow(), null, "Cópia nova do filme liberada — o site volta sozinho") }
+        runCatching {
+            val orig = video.ref
+            if (PartyConfig.checkShared(orig) == ShareCheck.NotShared) {
+                DriveShare.makePublic(AppGraph.http, token, orig)
+                for (k in 0 until 5) { if (PartyConfig.checkShared(orig) == ShareCheck.Ok) break; delay(1_200) }
+            }
+            if (PartyConfig.checkShared(orig) == ShareCheck.Ok && PartyConfig.checkDownload(orig) == ShareCheck.Ok) {
+                session.switchFile(orig)
+                "Filme liberado de novo — o site volta sozinho"
+            } else {
+                session.switchFile(PartyFix.freshCopy(token, video))
+                "Cópia nova do filme liberada — o site volta sozinho"
+            }
+        }.onSuccess { systemLines += Line("fix-${System.currentTimeMillis()}", session.serverNow(), null, it) }
             .onFailure { fixMsg = DriveShare.explain(it) }
         fixing = false
     }
@@ -681,14 +701,15 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
             Modifier.padding(horizontal = 12.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Cinema.surfaceHigh).padding(14.dp),
         ) {
             Text(
-                if (fixing) "Fazendo uma cópia nova do filme no seu Drive…"
-                else "O Google bloqueou o filme para ${blockedIssue?.name ?: "quem está no site"} (limite de downloads pelo link). Você continua vendo normal.",
+                if (fixing) "Destravando o filme para o site…"
+                else if (brokenIssue?.second == true) "O Google bloqueou o filme para ${blockedIssue?.name ?: "quem está no site"} (limite de downloads pelo link). Você continua vendo normal."
+                else "O filme não está liberado pelo link para ${blockedIssue?.name ?: "quem está no site"}.",
                 color = Cinema.text, fontSize = 13.sp,
             )
             fixMsg?.let { Spacer(Modifier.height(6.dp)); Text(it, color = Cinema.yellow, fontSize = 12.sp) }
             if (!fixing) {
                 Spacer(Modifier.height(10.dp))
-                PillButton("Gerar cópia nova e destravar", Icons.Rounded.Share, { startFix() }, Modifier.fillMaxWidth())
+                PillButton(if (brokenIssue?.second == true) "Gerar cópia nova e destravar" else "Liberar o filme", Icons.Rounded.Share, { startFix() }, Modifier.fillMaxWidth())
             } else {
                 Spacer(Modifier.height(8.dp))
                 androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth(), color = Cinema.accent)

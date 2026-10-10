@@ -38,10 +38,12 @@ object PartyFix {
 
     /** Joga na lixeira as cópias feitas para salas que já fecharam (em segundo plano, sem tela). */
     fun cleanupLater() {
-        if (PartyConfig.roomCopies.isEmpty()) return
+        // Só as que existem agora: uma cópia feita depois (sala nova abrindo) não pode ir junto.
+        val ids = PartyConfig.roomCopies
+        if (ids.isEmpty()) return
         CoroutineScope(Dispatchers.IO).launch {
             val auth = runCatching { AppGraph.auth.beginShare() }.getOrNull() as? DriveAuth.ShareAuth.Token ?: return@launch
-            for (id in PartyConfig.roomCopies) {
+            for (id in ids) {
                 runCatching { DriveShare.trash(AppGraph.http, auth.token, id) }
                     .onSuccess { PartyConfig.roomCopies = PartyConfig.roomCopies - id }
             }

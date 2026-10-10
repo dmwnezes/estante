@@ -399,7 +399,8 @@
     if (!mkv && !mkvProbed && roomVideo && video.error && video.error.code >= 3) { probeMkv(roomVideo); return; }
     // Erro de rede (ou o Drive respondeu com erro): descobre o motivo antes de mostrar qualquer coisa.
     if (!mkv && roomVideo && video.error && video.error.code <= 2) { recover("error"); return; }
-    if (!mkv && roomVideo && video.error && video.error.code === 4 && video.currentTime > 1) { recover("error"); return; }
+    // Código 4 depois de já termos olhado os bytes: confere o Drive antes de culpar o formato.
+    if (!mkv && roomVideo && video.error && video.error.code >= 3) { recover(video.currentTime > 1 ? "error" : "format"); return; }
     showVideoError();
   });
 
@@ -433,7 +434,8 @@
       onError: (msg, transient, info) => {
         if (transient) { note(msg); return; }
         if (info && (info.status === 403 || info.status === 404)) reportIssue(info);
-        overlay(msg + (info && /quota/i.test(info.reason || "") ? " Já avisei o app do Daniel: ele gera uma cópia nova e o filme volta sozinho." : ""), "Tentar de novo", () => { hideOverlay(); retrySource(); });
+        const told = info && (info.status === 403 || info.status === 404);
+        overlay(msg + (told ? " Já avisei o app do Daniel: ele resolve sozinho e o filme volta aqui." : ""), "Tentar de novo", () => { hideOverlay(); retrySource(); });
       },
       onRecover: () => note("Conexão de volta, o filme continua carregando."),
       onInfo: note,
@@ -446,10 +448,11 @@
     mkvProbed = true;
     try {
       const r = await fetch(driveUrl(v), { headers: { Range: "bytes=0-3" } });
-      if (!r.ok) throw 0;
+      // O Drive recusou: não é formato, é acesso (bloqueio ou compartilhamento) — descobre e avisa o app.
+      if (!r.ok) { recover("start"); return; }
       const b = new Uint8Array(await r.arrayBuffer());
-      if (!EstanteMkv.looksLikeMkv(b)) throw 0;
-    } catch (_) { showVideoError(); return; }
+      if (!EstanteMkv.looksLikeMkv(b)) { showVideoError(); return; }
+    } catch (_) { recover("start"); return; }
     startMkv(v);
     if (!mkv) return;
     if (lastState) { pendingSeek = expected(lastState); if (lastState.playing) doPlay(); }
@@ -529,13 +532,15 @@
       const limited = /rateLimit|userRateLimit/i.test(d.reason || "") || d.status === 429;
       if (!d.ok && !limited && (d.status === 403 || d.status === 404)) {
         reportIssue(d);
-        const quota = /quota|rateLimit/i.test(d.reason);
+        const quota = /quota|abusive/i.test(d.reason);
         overlay(quota
           ? "O Google bloqueou este filme para quem assiste pelo link (limite de downloads do Drive). Já avisei o app do Daniel: ele gera uma cópia nova e o filme volta sozinho aqui."
-          : "O Drive parou de liberar o filme (" + d.status + (d.reason ? ", " + d.reason : "") + "). Já avisei o app do Daniel; se ele gerar uma cópia nova, o filme volta sozinho.",
+          : "O filme não está liberado no Drive para quem assiste pelo link. Já avisei o app do Daniel: ele libera sozinho e o filme volta aqui (se demorar, peça para ele abrir a sala no app).",
           "Tentar de novo", () => { hideOverlay(); recovering = false; recover("manual"); });
         return;
       }
+      // O Drive entrega o arquivo normalmente: o problema é mesmo o formato.
+      if (d.ok && why === "format") { showVideoError(); return; }
       // Passageiro (internet, conexão longa cortada pelo Google): recarrega e volta ao ponto.
       const now = Date.now();
       retries = retries.filter((t) => now - t < 120000);
@@ -829,10 +834,10 @@
       return;
     }
     // O app trocou o arquivo (cópia nova quando o Drive bloqueia): troca aqui e volta ao ponto.
-    if (roomVideo && tree.video.fileId && tree.video.fileId !== roomVideo.fileId) {
+    if (roomVideo && tree.video.fileId && (tree.video.fileId !== roomVideo.fileId || (tree.video.rev || 0) !== (roomVideo.rev || 0))) {
       hideOverlay(); recovering = false; retries = []; mkvProbed = false;
       if (issueOpen) clearIssue();
-      note("O Daniel liberou uma cópia nova do filme. Voltando…");
+      note("O Daniel liberou o filme de novo. Voltando…");
       startSource(tree.video);
       if (lastState) { pendingSeek = expected(lastState); if (lastState.playing) doPlay(); }
     }
