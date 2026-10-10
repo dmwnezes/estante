@@ -92,6 +92,14 @@ object PartyConfig {
         }.getOrElse { ShareCheck.Ok }
     }
 
+    /**
+     * Cópia nova do filme a cada sessão: cada sala começa com o limite de downloads do Google
+     * zerado (o que evita o filme travar para quem assiste pelo link). Ligado por padrão.
+     */
+    var copyPerSession: Boolean
+        get() = prefs.getBoolean("partyCopyPerSession", true)
+        set(v) { prefs.edit().putBoolean("partyCopyPerSession", v).apply() }
+
     /** Cópias de filmes feitas para destravar a sala (vão para a lixeira quando a sala fecha). */
     var roomCopies: Set<String>
         get() = prefs.getStringSet("partyCopies", emptySet()).orEmpty()

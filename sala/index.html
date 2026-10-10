@@ -406,7 +406,7 @@
 
   // ---------- Fonte do vídeo (direto do Drive, ou MKV convertido na hora) ----------
   // useMkv: confirmado que o arquivo é MKV. mkvProbed: já olhamos os primeiros bytes uma vez.
-  let roomVideo = null, mkv = null, useMkv = false, mkvProbed = false, lastNote = "";
+  let roomVideo = null, mkv = null, useMkv = false, mkvProbed = false, lastNote = "", nativeOnly = false;
   const driveUrl = (v) => `https://www.googleapis.com/drive/v3/files/${v.fileId}?alt=media&supportsAllDrives=true&key=${v.key}`;
   const isMkv = (v) => /matroska/i.test(v.mime || "") || /\.mkv$/i.test(v.name || "");
   const canMse = () => !!(window.ManagedMediaSource || window.MediaSource) && !!window.EstanteMkv;
@@ -420,15 +420,32 @@
     // Trocar a fonte pausa o vídeo sozinho; isso não pode virar "pausou" para a sala.
     if (!video.paused) mark("pause");
     if (mkv) { mkv.destroy(); mkv = null; }
-    if (isMkv(v) || useMkv) startMkv(v);
-    else { video.srcObject = null; video.src = driveUrl(v); }
+    // Com MediaSource, tudo (MP4, MOV e MKV) passa pelo player do site: ele baixa vários minutos
+    // adiantado e se recupera sozinho. Sem MediaSource (iPhone antigo), MP4 vai pelo <video> normal.
+    if ((canMse() && !nativeOnly) || isMkv(v) || useMkv) startMkv(v);
+    else startNative(v);
+  }
+  function startNative(v) {
+    if (mkv) { mkv.destroy(); mkv = null; }
+    video.srcObject = null;
+    video.src = driveUrl(v);
   }
   function startMkv(v) {
-    useMkv = true;
+    if (isMkv(v)) useMkv = true;
     if (!video.paused) mark("pause");
     if (mkv) { mkv.destroy(); mkv = null; }
     if (!canMse()) { overlay(OLD_IOS, "Tentar de novo", () => { hideOverlay(); retrySource(); }); return; }
-    mkv = EstanteMkv.MkvPlayer(video, driveUrl(v), {
+    mkv = EstanteMkv.StreamPlayer(video, driveUrl(v), {
+      format: isMkv(v) ? "mkv" : "",
+      aheadSeconds: 600,
+      // MP4 que o player do site não sabe ler: volta para o <video> normal (como era antes).
+      onFallback: (why) => {
+        console.log("player do site → vídeo normal:", why);
+        nativeOnly = true;
+        if (!video.paused) mark("pause");
+        startNative(v);
+        if (lastState) { pendingSeek = expected(lastState); if (lastState.playing) doPlay(); }
+      },
       sizeUrl: `https://www.googleapis.com/drive/v3/files/${v.fileId}?fields=size&supportsAllDrives=true&key=${v.key}`,
       // Problema passageiro (internet): só avisa no chat; o player tenta sozinho.
       onError: (msg, transient, info) => {
@@ -816,11 +833,20 @@
   });
 
   // ---------- Conexão ----------
+  let connOk = false;
   function showConn(ok) {
     const s = $("sync");
-    if (ok === true) { s.textContent = "sincronizado"; s.className = "sync ok"; }
+    connOk = ok === true;
+    if (ok === true) { s.textContent = "sincronizado" + aheadLabel(); s.className = "sync ok"; }
     else { s.textContent = "reconectando…"; s.className = "sync off"; }
   }
+
+  /** "· 8 min carregados": quanto do filme já está guardado à frente (player do site). */
+  function aheadLabel() {
+    const a = mkv ? mkv.aheadSeconds : 0;
+    return a >= 90 ? ` · ${Math.floor(a / 60)} min carregados` : "";
+  }
+  setInterval(() => { if (connOk && joined) showConn(true); }, 5000);
 
   function onTree() {
     if (!loaded) return;
