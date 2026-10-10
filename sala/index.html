@@ -385,6 +385,11 @@
   video.addEventListener("play", () => {
     if (consume("play") || !joined) return;
     if (cdState) { mark("pause"); video.pause(); return; } // já está contando
+    // A sala já está tocando (ex.: ela tocou no play depois de uma travada, ou o navegador
+    // retomou sozinho): só alcança a sala. Contagem só quando a sala estava pausada.
+    if (lastState && lastState.playing) { if (video.readyState >= 1) seekTo(expected(lastState)); else pendingSeek = expected(lastState); return; }
+    // Vídeo ainda sem o começo carregado: a posição seria 0 e mandaria a sala para o início.
+    if (video.readyState < 1 || pendingSeek != null) { mark("pause"); video.pause(); return; }
     playWithCountdown();
   });
   video.addEventListener("pause", () => { if (!consume("pause") && joined && !video.seeking && !video.ended && video.readyState > 0) sendState(false); });
@@ -392,6 +397,9 @@
   video.addEventListener("error", () => {
     // O Safari não abre MKV sozinho: se o arquivo for MKV, troca para o conversor do site.
     if (!mkv && !mkvProbed && roomVideo && video.error && video.error.code >= 3) { probeMkv(roomVideo); return; }
+    // Erro de rede (ou o Drive respondeu com erro): descobre o motivo antes de mostrar qualquer coisa.
+    if (!mkv && roomVideo && video.error && video.error.code <= 2) { recover("error"); return; }
+    if (!mkv && roomVideo && video.error && video.error.code === 4 && video.currentTime > 1) { recover("error"); return; }
     showVideoError();
   });
 
@@ -405,6 +413,8 @@
   function note(text) { if (text === lastNote) return; lastNote = text; systemLines.push({ at: serverNow(), text }); renderChat(); }
   const OLD_IOS = "Este navegador não consegue tocar MKV. No iPhone, precisa do iOS 17.1 ou mais novo (Ajustes › Geral › Atualização de Software).";
   function startSource(v) {
+    // Cópia: a árvore da sala é alterada no lugar, e precisamos notar quando o arquivo muda.
+    v = Object.assign({}, v);
     roomVideo = v;
     // Trocar a fonte pausa o vídeo sozinho; isso não pode virar "pausou" para a sala.
     if (!video.paused) mark("pause");
@@ -420,7 +430,11 @@
     mkv = EstanteMkv.MkvPlayer(video, driveUrl(v), {
       sizeUrl: `https://www.googleapis.com/drive/v3/files/${v.fileId}?fields=size&supportsAllDrives=true&key=${v.key}`,
       // Problema passageiro (internet): só avisa no chat; o player tenta sozinho.
-      onError: (msg, transient) => transient ? note(msg) : overlay(msg, "Tentar de novo", () => { hideOverlay(); retrySource(); }),
+      onError: (msg, transient, info) => {
+        if (transient) { note(msg); return; }
+        if (info && (info.status === 403 || info.status === 404)) reportIssue(info);
+        overlay(msg + (info && /quota/i.test(info.reason || "") ? " Já avisei o app do Daniel: ele gera uma cópia nova e o filme volta sozinho." : ""), "Tentar de novo", () => { hideOverlay(); retrySource(); });
+      },
       onRecover: () => note("Conexão de volta, o filme continua carregando."),
       onInfo: note,
       subtitles: !v.subtitleId,
@@ -474,12 +488,87 @@
     overlay(msg, "Tentar de novo", () => { hideOverlay(); retrySource(); });
   }
 
-  // A cada 3 s confere se escorregou mais de 1,5 s e ajusta.
+  // A cada 3 s confere se escorregou mais de 1,5 s e ajusta. Nunca enquanto o vídeo está
+  // carregando: cada pulo faz o navegador pedir o filme de novo ao Drive, e uma sequência de
+  // pulos durante um travamento é exatamente o que faz o Google bloquear o arquivo.
+  let lastFix = 0;
   setInterval(() => {
     renderPeople();
     if (!joined || !lastState || !lastState.playing || video.paused || video.seeking) return;
-    seekTo(expected(lastState), 1.5);
+    if (buffering || video.readyState < 3 || Date.now() - lastFix < 10000) return;
+    if (Math.abs(video.currentTime - expected(lastState)) > 1.5) { lastFix = Date.now(); seekTo(expected(lastState), 1.5); }
   }, 3000);
+
+  // ---------- Travou / erro do Drive: descobre o motivo e se recupera sozinho ----------
+  let buffering = false, stallSince = 0, recovering = false, retries = [], issueOpen = false;
+  video.addEventListener("waiting", () => { buffering = true; if (!stallSince) stallSince = Date.now(); });
+  video.addEventListener("playing", () => { buffering = false; stallSince = 0; if (issueOpen) clearIssue(); });
+  video.addEventListener("canplay", () => { buffering = false; });
+  /** Pergunta ao Drive o que está acontecendo (1 byte só). */
+  async function diagnose(v) {
+    try {
+      const r = await fetch(driveUrl(v), { headers: { Range: "bytes=0-0" }, cache: "no-store" });
+      if (r.ok) return { ok: true, status: r.status };
+      let reason = "";
+      try { const j = await r.json(); reason = (j.error && ((j.error.errors && j.error.errors[0] && j.error.errors[0].reason) || j.error.status)) || ""; } catch (_) {}
+      return { ok: false, status: r.status, reason };
+    } catch (e) { return { ok: false, status: 0, reason: "offline" }; }
+  }
+  const BLOCKED = /downloadQuotaExceeded|quota|abusive|forbidden|notFound|insufficient/i;
+  function reportIssue(d) {
+    issueOpen = true;
+    api("PUT", `/issues/${me}`, { name: myName, status: d.status, reason: d.reason || "", fileId: roomVideo ? roomVideo.fileId : "", at: SV }).catch(() => {});
+  }
+  function clearIssue() { issueOpen = false; api("DELETE", `/issues/${me}`).catch(() => {}); }
+  /** Volta o filme do ponto onde parou, sem pedir nada à pessoa. */
+  async function recover(why) {
+    if (recovering || !roomVideo) return;
+    recovering = true;
+    try {
+      const d = await diagnose(roomVideo);
+      const limited = /rateLimit|userRateLimit/i.test(d.reason || "") || d.status === 429;
+      if (!d.ok && !limited && (d.status === 403 || d.status === 404)) {
+        reportIssue(d);
+        const quota = /quota|rateLimit/i.test(d.reason);
+        overlay(quota
+          ? "O Google bloqueou este filme para quem assiste pelo link (limite de downloads do Drive). Já avisei o app do Daniel: ele gera uma cópia nova e o filme volta sozinho aqui."
+          : "O Drive parou de liberar o filme (" + d.status + (d.reason ? ", " + d.reason : "") + "). Já avisei o app do Daniel; se ele gerar uma cópia nova, o filme volta sozinho.",
+          "Tentar de novo", () => { hideOverlay(); recovering = false; recover("manual"); });
+        return;
+      }
+      // Passageiro (internet, conexão longa cortada pelo Google): recarrega e volta ao ponto.
+      const now = Date.now();
+      retries = retries.filter((t) => now - t < 120000);
+      if (retries.length >= 4 && why !== "manual") {
+        if (!d.ok) reportIssue(d);
+        overlay("A conexão com o Drive está instável. Toque para tentar de novo.", "Tentar de novo", () => { hideOverlay(); retries = []; recovering = false; recover("manual"); });
+        return;
+      }
+      retries.push(now);
+      // Avisa o app mesmo quando não deu para ler o motivo (o app confere direto no Drive).
+      if (!d.ok) reportIssue(d);
+      if (limited) { note("O Google pediu uma pausa nos downloads; tentando de novo em instantes…"); await new Promise((r) => setTimeout(r, 15000 * retries.length)); }
+      else if (!d.ok) { note("Sem conexão com o Drive. Tentando de novo…"); await new Promise((r) => setTimeout(r, 2000 * retries.length)); }
+      else note("O filme travou; voltando do ponto onde estava…");
+      hideOverlay();
+      reloadSource();
+    } finally { if (!$("overlay").classList.contains("show")) recovering = false; }
+  }
+  function reloadSource() {
+    const t = lastState ? expected(lastState) : video.currentTime;
+    stallSince = 0; buffering = false;
+    if (mkv) { retrySource(); return; }
+    if (!video.paused) mark("pause");
+    video.removeAttribute("src"); video.load();
+    video.src = driveUrl(roomVideo);
+    pendingSeek = t;
+    if (lastState && lastState.playing) doPlay();
+  }
+  // Travado esperando dados por mais de 25 s (sem erro nenhum): trata como queda.
+  setInterval(() => {
+    if (!joined || !roomVideo || mkv || video.paused || !stallSince || recovering) return;
+    if (Date.now() - stallSince > 25000) recover("stall");
+  }, 5000);
 
   // ---------- Legenda (.srt → WebVTT, corrigindo acentos) ----------
   async function loadSubtitle(v) {
@@ -738,6 +827,14 @@
       $("joinText").innerHTML = `Você foi chamado para assistir <span class="movie">${esc(tree.video.title)}</span>. Como quer aparecer?`;
       $("enter").disabled = !$("name").value.trim();
       return;
+    }
+    // O app trocou o arquivo (cópia nova quando o Drive bloqueia): troca aqui e volta ao ponto.
+    if (roomVideo && tree.video.fileId && tree.video.fileId !== roomVideo.fileId) {
+      hideOverlay(); recovering = false; retries = []; mkvProbed = false;
+      if (issueOpen) clearIssue();
+      note("O Daniel liberou uma cópia nova do filme. Voltando…");
+      startSource(tree.video);
+      if (lastState) { pendingSeek = expected(lastState); if (lastState.playing) doPlay(); }
     }
     const s = tree.state;
     if (s && s.by !== me) {

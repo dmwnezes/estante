@@ -110,7 +110,7 @@ import com.dmwnezes.estante.ui.TopBar
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private enum class Step { CHECKING, NOT_CONFIGURED, NEED_NAME, INCOMPATIBLE, NOT_SHARED, BAD_KEY, FAILED, ROOM }
+private enum class Step { CHECKING, NOT_CONFIGURED, NEED_NAME, INCOMPATIBLE, NOT_SHARED, BLOCKED, COPYING, BAD_KEY, FAILED, ROOM }
 
 /** Cor fixa por pessoa (pelo nome), para o avatar e o nome no chat. */
 fun personColor(name: String): Color {
@@ -179,6 +179,8 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
         }
     }
 
+    LaunchedEffect(Unit) { PartyFix.cleanupLater() }
+
     LaunchedEffect(retry, acceptIncompatible) {
         step = Step.CHECKING
         when {
@@ -202,7 +204,20 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
             }
             ShareCheck.BadKey -> { step = Step.BAD_KEY; return@LaunchedEffect }
             is ShareCheck.Failed -> { failMsg = c.message; step = Step.FAILED; return@LaunchedEffect }
-            ShareCheck.Ok -> {}
+            is ShareCheck.Blocked, ShareCheck.Ok -> {}
+        }
+        // Compartilhado, mas o Google pode ter bloqueado o download pelo link (limite de downloads).
+        var roomFile = video.ref
+        if (PartyConfig.checkDownload(video.ref) is ShareCheck.Blocked) {
+            val r = if (AppGraph.auth.shareGranted) runCatching { AppGraph.auth.beginShare() }.getOrNull() else null
+            if (r is DriveAuth.ShareAuth.Token) {
+                step = Step.COPYING
+                runCatching { PartyFix.freshCopy(r.token, video) }
+                    .onSuccess { roomFile = it }
+                    .onFailure { failMsg = "O Google bloqueou este filme para quem assiste pelo link e não consegui fazer uma cópia: " + DriveShare.explain(it); step = Step.FAILED; return@LaunchedEffect }
+            } else {
+                step = Step.BLOCKED; return@LaunchedEffect
+            }
         }
         // A legenda também precisa estar liberada (senão o site fica sem ela, sem avisar).
         if (sub != null && AppGraph.auth.shareGranted && PartyConfig.checkShared(sub) == ShareCheck.NotShared) {
@@ -213,7 +228,7 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
         val s = PartySession(PartyConfig.db(), PartySync.newCode(), PartyConfig.name, PartyConfig.avatar)
         runCatching {
             s.create(
-                RoomVideo(video.ref, video.title, PartyConfig.apiKey, sub, PartySync.roomMime(video.fileName)),
+                RoomVideo(roomFile, video.title, PartyConfig.apiKey, sub, PartySync.roomMime(video.fileName)),
                 Resume.startAt(video) / 1000.0,
             )
         }.onFailure { failMsg = it.message ?: "Não consegui criar a sala."; step = Step.FAILED; return@LaunchedEffect }
@@ -236,6 +251,25 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
                 verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 when (step) {
+                    Step.COPYING -> {
+                        CircularProgressIndicator(color = Cinema.accent)
+                        Spacer(Modifier.height(14.dp))
+                        Text("O Google bloqueou este filme para quem assiste pelo link.\nFazendo uma cópia nova no seu Drive…", color = Cinema.muted, textAlign = TextAlign.Center)
+                    }
+                    Step.BLOCKED -> Info(
+                        "O Google bloqueou este filme pelo link",
+                        "Muita gente (ou muitos pedidos) baixou este arquivo pelo link nas últimas horas, e o Google trava por até 24 h para quem não é dono. Você continua vendo normal. O app resolve fazendo uma cópia do filme no seu Drive (vai para a lixeira quando a sala fechar).",
+                    ) {
+                        if (sharing) {
+                            CircularProgressIndicator(color = Cinema.accent)
+                        } else {
+                            shareError?.let {
+                                Text(it, color = Cinema.yellow, fontSize = 14.sp, textAlign = TextAlign.Center)
+                                Spacer(Modifier.height(14.dp))
+                            }
+                            PillButton("Fazer cópia e abrir a sala", Icons.Rounded.Share, { startShare() }, Modifier.fillMaxWidth())
+                        }
+                    }
                     Step.CHECKING, Step.ROOM -> {
                         CircularProgressIndicator(color = Cinema.accent)
                         Spacer(Modifier.height(14.dp))
@@ -340,6 +374,7 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
     var text by remember { mutableStateOf("") }
     var full by remember { mutableStateOf(false) }
     var showPeople by remember { mutableStateOf(false) }
+
     var lastBig by remember { mutableLongStateOf(0L) }
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     var myAvatar by remember { mutableStateOf(session.myAvatar) }
@@ -348,6 +383,53 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
     var viewing by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var sendingPhoto by remember { mutableStateOf(false) }
     val roomScope = rememberCoroutineScope()
+    // ---- O Google bloqueou o filme para quem está no site: cópia nova e a sala troca sozinha ----
+    val issues by session.issues.collectAsState()
+    val roomVideoNow by session.roomVideo.collectAsState()
+    val lastIssue = issues.filter { it.fileId.isBlank() || it.fileId == roomVideoNow?.fileId }.maxByOrNull { it.at }
+    // O site nem sempre consegue ler o motivo do erro; o app confere direto no Drive.
+    val blockedIssue by androidx.compose.runtime.produceState<Issue?>(null, lastIssue?.id, lastIssue?.at, roomVideoNow?.fileId) {
+        val i = lastIssue
+        value = when {
+            i == null -> null
+            i.blocked -> i
+            PartyConfig.checkDownload(roomVideoNow?.fileId ?: video.ref) is ShareCheck.Blocked -> i
+            else -> null
+        }
+    }
+    var fixing by remember { mutableStateOf(false) }
+    var fixMsg by remember { mutableStateOf<String?>(null) }
+    var autoFixes by remember { mutableIntStateOf(0) }
+    suspend fun fixWith(token: String) {
+        fixing = true
+        fixMsg = null
+        runCatching { session.switchFile(PartyFix.freshCopy(token, video)) }
+            .onSuccess { systemLines += Line("fix-${System.currentTimeMillis()}", session.serverNow(), null, "Cópia nova do filme liberada — o site volta sozinho") }
+            .onFailure { fixMsg = DriveShare.explain(it) }
+        fixing = false
+    }
+    val fixConsent = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { res ->
+        if (res.resultCode != Activity.RESULT_OK) { fixMsg = "Você fechou a tela do Google antes de permitir."; return@rememberLauncherForActivityResult }
+        roomScope.launch { runCatching { AppGraph.auth.finishShare(res.data) }.fold({ fixWith(it) }, { fixMsg = AppGraph.auth.explain(it) }) }
+    }
+    fun startFix() {
+        if (fixing) return
+        roomScope.launch {
+            when (val r = runCatching { AppGraph.auth.beginShare() }.getOrElse { fixMsg = AppGraph.auth.explain(it); return@launch }) {
+                is DriveAuth.ShareAuth.NeedsScreen -> runCatching { fixConsent.launch(IntentSenderRequest.Builder(r.intent.intentSender).build()) }
+                is DriveAuth.ShareAuth.Token -> fixWith(r.token)
+            }
+        }
+    }
+    // Já deu a permissão antes: resolve sozinho (até 3 vezes por sala, para não entrar em ciclo).
+    LaunchedEffect(blockedIssue?.id, blockedIssue?.at) {
+        if (blockedIssue != null && !fixing && autoFixes < 3 && AppGraph.auth.shareGranted) {
+            autoFixes++
+            startFix()
+        }
+    }
+    // Sala fechou: as cópias feitas para ela vão para a lixeira.
+    DisposableEffect(Unit) { onDispose { PartyFix.cleanupLater() } }
     // Foto escolhida: reduz e manda (o texto que estiver digitado vai junto como legenda).
     val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
         if (uri != null) {
@@ -417,6 +499,9 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
                     suppressUntil = System.currentTimeMillis() + 900
                     player.playWhenReady = false
                     if (countdownAt > 0) return
+                    // A sala já está tocando: só alcança (contagem é para quando estava pausada).
+                    val cur = lastState
+                    if (cur != null && cur.playing) { applyRemote(cur); return }
                     val pos = player.currentPosition / 1000.0
                     val at = session.serverNow() + PartySync.COUNTDOWN_MS
                     session.sendState(true, pos, at, countdown = true)
@@ -592,6 +677,23 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
             ) { Icon(Icons.Rounded.Share, "Convidar", tint = Cinema.onAccent, modifier = Modifier.size(18.dp)) }
         }
         error?.let { Text(it, color = Cinema.red, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp)) }
+        if (blockedIssue != null || fixing) Column(
+            Modifier.padding(horizontal = 12.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Cinema.surfaceHigh).padding(14.dp),
+        ) {
+            Text(
+                if (fixing) "Fazendo uma cópia nova do filme no seu Drive…"
+                else "O Google bloqueou o filme para ${blockedIssue?.name ?: "quem está no site"} (limite de downloads pelo link). Você continua vendo normal.",
+                color = Cinema.text, fontSize = 13.sp,
+            )
+            fixMsg?.let { Spacer(Modifier.height(6.dp)); Text(it, color = Cinema.yellow, fontSize = 12.sp) }
+            if (!fixing) {
+                Spacer(Modifier.height(10.dp))
+                PillButton("Gerar cópia nova e destravar", Icons.Rounded.Share, { startFix() }, Modifier.fillMaxWidth())
+            } else {
+                Spacer(Modifier.height(8.dp))
+                androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth(), color = Cinema.accent)
+            }
+        }
 
         // Chat
         LazyColumn(

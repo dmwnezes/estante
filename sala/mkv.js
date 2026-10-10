@@ -127,6 +127,32 @@
       return all.subarray(off, off + (end - pos + 1));
     }
 
+    /**
+     * Leitura do filme em blocos grandes (4 MB): o mesmo pedido ao Drive serve vários Clusters.
+     * Menos pedidos = menos chance de o Google achar que é abuso e bloquear o arquivo.
+     */
+    async bigBytes(pos, len) {
+      const B = 4 * 1024 * 1024;
+      if (len <= 0) return new Uint8Array(0);
+      const end = Math.min(this.size, pos + len) - 1;
+      const first = Math.floor(pos / B), last = Math.floor(end / B);
+      if (!this.big) this.big = new Map();
+      const parts = [];
+      for (let i = first; i <= last; i++) {
+        let blk = this.big.get(i);
+        if (!blk) {
+          blk = this.fetchRange(i * B, Math.min(this.size, (i + 1) * B) - 1);
+          this.big.set(i, blk);
+          blk.catch(() => this.big.delete(i));
+          while (this.big.size > 6) this.big.delete(this.big.keys().next().value);
+        }
+        parts.push(await blk);
+      }
+      const all = parts.length === 1 ? parts[0] : concat(parts);
+      const off = pos - first * B;
+      return all.subarray(off, off + (end - pos + 1));
+    }
+
     async header(pos) {
       const b = await this.bytes(pos, 16);
       const h = readHeader(b, 0);
@@ -298,7 +324,10 @@
      */
     async cluster(pos) {
       if (pos >= this.segEnd) return { next: -1, frames: [] };
-      const h = await this.header(pos);
+      const B = 4 * 1024 * 1024;
+      const h = this.big && this.big.has(Math.floor(pos / B)) && (pos % B) < B - 16
+        ? readHeader(await this.bigBytes(pos, 16), 0) || await this.header(pos)
+        : await this.header(pos);
       const ds = pos + h.hlen;
       if (h.id !== ID.Cluster) {
         if (h.unknown || !TOP_LEVEL.has(h.id) && h.id !== ID.Void) {
@@ -321,7 +350,7 @@
         body = body.subarray(0, Math.min(p, body.length));
         end = ds + body.length;
       } else {
-        body = await this.bytes(ds, h.size);
+        body = await this.bigBytes(ds, h.size);
         end = ds + h.size;
       }
       return { next: end, frames: this.parseCluster(body) };
@@ -740,7 +769,7 @@
     const MS = root.ManagedMediaSource || root.MediaSource;
     const managed = !!root.ManagedMediaSource && MS === root.ManagedMediaSource;
     // transient = problema passageiro (o player continua tentando sozinho).
-    const fail = (m, transient) => { if (!destroyed && opts.onError) opts.onError(m, !!transient); };
+    const fail = (m, transient, info) => { if (!destroyed && opts.onError) opts.onError(m, !!transient, info || null); };
     const recovered = () => { if (!destroyed && opts.onRecover) opts.onRecover(); };
     if (!MS) { fail("Este navegador não consegue tocar MKV (no iPhone, precisa do iOS 17.1 ou mais novo)."); return null; }
 
@@ -875,7 +904,7 @@
         }
         catch (e) {
           if (my !== gen || destroyed) return;
-          if (e.fatal) { fail(e.msg || NOT_SHARED); return; }
+          if (e.fatal) { fail(e.msg || NOT_SHARED, false, { status: e.status, reason: e.reason }); return; }
           failing = true;
           fail("A conexão caiu enquanto carregava o filme. Tentando de novo…", true);
           await sleep(2000);
@@ -995,7 +1024,7 @@
         pump(gen);
       } catch (e) {
         if (destroyed) return;
-        fail(e && e.fatal ? (e.msg || NOT_SHARED) : "Não consegui abrir este MKV: " + (e && e.message ? e.message : e));
+        fail(e && e.fatal ? (e.msg || NOT_SHARED) : "Não consegui abrir este MKV: " + (e && e.message ? e.message : e), false, e && e.fatal ? { status: e.status, reason: e.reason } : null);
       }
     }, { once: true });
 

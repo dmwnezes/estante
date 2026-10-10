@@ -27,6 +27,37 @@ object DriveShare {
         }
     }
 
+    /**
+     * Faz uma cópia do arquivo no Drive (mesma pasta). Cópia nova = limite de downloads novo:
+     * é o jeito de destravar um filme que o Google bloqueou para quem assiste pelo link.
+     */
+    suspend fun copy(http: OkHttpClient, token: String, fileId: String, name: String?): String = withContext(Dispatchers.IO) {
+        val slow = http.newBuilder().readTimeout(java.time.Duration.ofMinutes(4)).callTimeout(java.time.Duration.ofMinutes(5)).build()
+        val body = JSONObject().apply { if (!name.isNullOrBlank()) put("name", name) }.toString()
+        val req = Request.Builder()
+            .url("https://www.googleapis.com/drive/v3/files/$fileId/copy?supportsAllDrives=true&fields=id")
+            .header("Authorization", "Bearer $token")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
+        slow.newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw DriveApiException.from(resp.code, text)
+            JSONObject(text).getString("id")
+        }
+    }
+
+    /** Manda para a lixeira (dá para recuperar por 30 dias). */
+    suspend fun trash(http: OkHttpClient, token: String, fileId: String) = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url("https://www.googleapis.com/drive/v3/files/$fileId?supportsAllDrives=true&fields=id")
+            .header("Authorization", "Bearer $token")
+            .patch(JSONObject().put("trashed", true).toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful && resp.code != 404) throw DriveApiException.from(resp.code, resp.body?.string().orEmpty())
+        }
+    }
+
     /** Explica em português por que o Google não deixou compartilhar. */
     fun explain(e: Throwable): String {
         val api = e as? DriveApiException ?: return e.message ?: "Não consegui falar com o Google."

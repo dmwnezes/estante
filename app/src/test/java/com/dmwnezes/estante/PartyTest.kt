@@ -96,4 +96,14 @@ class PartyTest {
         assertEquals(30.0, PartySync.expected(s, 8_000), 0.001)
         assertEquals(32.0, PartySync.expected(s, 12_000), 0.001)
     }
+
+    @Test
+    fun blockedFilmFix() {
+        assertTrue(com.dmwnezes.estante.party.Issue("a", "Mandis", 403, "downloadQuotaExceeded", "F", 1).blocked)
+        assertFalse(com.dmwnezes.estante.party.Issue("a", "Mandis", 403, "userRateLimitExceeded", "F", 1).blocked)
+        assertFalse(com.dmwnezes.estante.party.Issue("a", "Mandis", 0, "offline", "F", 1).blocked)
+        val v = com.dmwnezes.estante.data.Video("1", com.dmwnezes.estante.data.Source.DRIVE, "x", "Filme", fileName = "Filme (2001).mkv")
+        assertEquals("Filme (2001) (cópia da sala).mkv", com.dmwnezes.estante.party.PartyFix.copyName(v))
+        assertEquals("Filme (cópia da sala)", com.dmwnezes.estante.party.PartyFix.copyName(v.copy(fileName = null)))
+    }
 }

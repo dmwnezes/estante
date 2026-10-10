@@ -12,6 +12,8 @@ sealed interface ShareCheck {
     data object Ok : ShareCheck
     data object NotShared : ShareCheck
     data object BadKey : ShareCheck
+    /** Compartilhado, mas o Google bloqueou o download pelo link (limite de downloads do arquivo). */
+    data class Blocked(val reason: String) : ShareCheck
     data class Failed(val message: String) : ShareCheck
 }
 
@@ -65,6 +67,35 @@ object PartyConfig {
             }
         }.getOrElse { ShareCheck.Failed(it.message ?: "sem internet") }
     }
+
+    /**
+     * Pede 1 byte do filme do jeito que o site pede. Descobre o bloqueio do Google
+     * ("downloadQuotaExceeded") antes de a sala começar.
+     */
+    suspend fun checkDownload(fileId: String): ShareCheck = withContext(Dispatchers.IO) {
+        runCatching {
+            val url = "https://www.googleapis.com/drive/v3/files/$fileId".toHttpUrl().newBuilder()
+                .addQueryParameter("alt", "media").addQueryParameter("supportsAllDrives", "true")
+                .addQueryParameter("key", apiKey).build()
+            val req = Request.Builder().url(url).header("Referer", PartySync.SITE).header("Range", "bytes=0-0").build()
+            AppGraph.http.newCall(req).execute().use { resp ->
+                val body = if (resp.isSuccessful) "" else resp.body?.string().orEmpty()
+                when {
+                    resp.isSuccessful -> ShareCheck.Ok
+                    resp.code == 403 && body.contains("rateLimit", true) -> ShareCheck.Ok // passageiro
+                    resp.code == 403 && (body.contains("quota", true) || body.contains("abusive", true)) ->
+                        ShareCheck.Blocked(com.dmwnezes.estante.drive.DriveApiException.from(403, body).reason)
+                    resp.code == 404 || resp.code == 403 -> ShareCheck.NotShared
+                    else -> ShareCheck.Ok
+                }
+            }
+        }.getOrElse { ShareCheck.Ok }
+    }
+
+    /** Cópias de filmes feitas para destravar a sala (vão para a lixeira quando a sala fecha). */
+    var roomCopies: Set<String>
+        get() = prefs.getStringSet("partyCopies", emptySet()).orEmpty()
+        set(v) { prefs.edit().putStringSet("partyCopies", v).apply() }
 
     /** Testa se o banco aceita gravar e ler (regras certas). */
     suspend fun checkDb(): String? = runCatching {

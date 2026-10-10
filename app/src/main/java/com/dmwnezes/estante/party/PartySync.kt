@@ -21,6 +21,12 @@ data class Reaction(val id: String, val emoji: String, val name: String, val at:
 /** Reações permitidas (as mesmas do site). */
 val REACTIONS = listOf("😂", "😱", "❤️", "👏", "😭", "🍿")
 
+/** Problema que o site avisou (o Drive parou de entregar o filme para quem está no link). */
+data class Issue(val id: String, val name: String, val status: Int, val reason: String, val fileId: String, val at: Long) {
+    /** Bloqueio que só uma cópia nova resolve (não é internet nem "espere um pouco"). */
+    val blocked: Boolean get() = (status == 403 || status == 404) && !reason.contains("rateLimit", true)
+}
+
 data class ChatMessage(val id: String, val name: String, val text: String, val at: Long, val by: String, val image: String? = null)
 
 /** Contas da sincronia (sem Android, para poder testar). */

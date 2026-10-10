@@ -58,6 +58,10 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
     private val _typing = MutableStateFlow<Map<String, Pair<String, Long>>>(emptyMap())
     /** Quem avisou que está digitando: id → (nome, quando). */
     val typing: StateFlow<Map<String, Pair<String, Long>>> = _typing.asStateFlow()
+    private val _issues = MutableStateFlow<List<Issue>>(emptyList())
+    val issues: StateFlow<List<Issue>> = _issues.asStateFlow()
+    private val _roomVideo = MutableStateFlow<RoomVideo?>(null)
+    val roomVideo: StateFlow<RoomVideo?> = _roomVideo.asStateFlow()
     private val _reactions = MutableStateFlow<List<Reaction>>(emptyList())
     val reactions: StateFlow<List<Reaction>> = _reactions.asStateFlow()
     /** Nomes de todo mundo que passou pela sala (para o diário). */
@@ -109,6 +113,12 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
     private fun publish() {
         val t = tree as? JSONObject ?: return
         _host.value = t.optString("host").ifBlank { null }
+        RoomVideo.from(t.optJSONObject("video"))?.let { if (it != _roomVideo.value) _roomVideo.value = it }
+        _issues.value = t.optJSONObject("issues")?.let { o ->
+            o.keys().asSequence().mapNotNull { id ->
+                o.optJSONObject(id)?.let { Issue(id, it.optString("name", "?"), it.optInt("status"), it.optString("reason"), it.optString("fileId"), it.optLong("at")) }
+            }.toList()
+        } ?: emptyList()
         t.optJSONObject("people")?.let { p ->
             _people.value = p.keys().asSequence().mapNotNull { id ->
                 p.optJSONObject(id)?.let { Person(id, it.optString("name", "?"), it.optLong("lastSeen"), it.optString("platform"), it.optString("avatar").takeIf { a -> a.isNotBlank() }) }
@@ -146,6 +156,12 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
 
     private fun meJson() = JSONObject().put("name", myName).put("lastSeen", SERVER_TIME).put("platform", "android")
         .apply { if (myAvatar.isNotBlank()) put("avatar", myAvatar) }
+
+    /** Troca o arquivo que o site toca (cópia nova do filme) e limpa os avisos de problema. */
+    suspend fun switchFile(fileId: String) {
+        db.put("$root/video/fileId", fileId)
+        runCatching { db.delete("$root/issues") }
+    }
 
     /** Troca a foto de perfil e avisa a sala na hora. */
     fun setAvatar(key: String) {
