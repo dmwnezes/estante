@@ -120,7 +120,7 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
         } ?: emptyMap()
         t.optJSONObject("reactions")?.let { r ->
             _reactions.value = r.keys().asSequence().mapNotNull { id ->
-                r.optJSONObject(id)?.let { Reaction(id, it.optString("e"), it.optString("name", "?"), it.optLong("at"), it.optString("by")) }
+                r.optJSONObject(id)?.let { Reaction(id, it.optString("e"), it.optString("name", "?"), it.optLong("at"), it.optString("by"), it.optBoolean("big")) }
             }.filter { it.emoji in REACTIONS }.sortedBy { it.at }.toList().takeLast(40)
         }
         t.optJSONObject("chat")?.let { c ->
@@ -137,9 +137,10 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
     }
 
     /** Avisa a sala: play/pause/pulo feito aqui. */
-    fun sendState(playing: Boolean, positionSec: Double) {
+    fun sendState(playing: Boolean, positionSec: Double, at: Long = serverNow(), countdown: Boolean = false) {
         seq++
-        val body = JSONObject().put("playing", playing).put("position", positionSec).put("at", serverNow()).put("by", me).put("seq", seq)
+        val body = JSONObject().put("playing", playing).put("position", positionSec).put("at", at).put("by", me).put("seq", seq)
+        if (countdown) body.put("cd", true)
         scope.launch { runCatching { db.put("$root/state", body) }.onFailure { _error.value = it.message } }
     }
 
@@ -175,10 +176,10 @@ class PartySession(private val db: PartyDb, val code: String, val myName: String
         }
     }
 
-    fun sendReaction(emoji: String) {
+    fun sendReaction(emoji: String, big: Boolean = false) {
         if (emoji !in REACTIONS) return
         scope.launch {
-            runCatching { db.push("$root/reactions", JSONObject().put("e", emoji).put("name", myName).put("by", me).put("at", SERVER_TIME)) }
+            runCatching { db.push("$root/reactions", JSONObject().put("e", emoji).put("name", myName).put("by", me).put("at", SERVER_TIME).apply { if (big) put("big", true) }) }
                 .onFailure { _error.value = it.message }
         }
     }

@@ -10,6 +10,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -258,7 +260,7 @@ fun PartyScreen(video: Video, onBack: () -> Unit, onOpenSettings: () -> Unit) {
                     }
                     Step.INCOMPATIBLE -> Info(
                         "Esse formato não toca no iPhone",
-                        "O Safari do iPhone toca MP4, MOV e MKV (MKV só no iOS 17.1 ou mais novo). Este arquivo (${video.fileName ?: "formato desconhecido"}) provavelmente não vai abrir para ela. Dá para converter para MP4 no computador (HandBrake, grátis) e colocar no Drive.",
+                        "O Safari do iPhone toca MP4, MOV e MKV (MKV só no iOS 17.1 ou mais novo). Este arquivo (${video.fileName ?: "formato desconhecido"}) provavelmente não vai abrir para ela. Dá para converter para MP4 no computador com o conversor da Estante (Ajustes › Converter filmes no computador) e colocar no Drive.",
                     ) {
                         PillButton("Abrir assim mesmo", null, { acceptIncompatible = true }, filled = false)
                     }
@@ -308,7 +310,7 @@ private fun Info(title: String, text: String, actions: @Composable () -> Unit) {
 private data class Line(val key: String, val at: Long, val msg: ChatMessage?, val system: String?)
 
 @androidx.annotation.OptIn(UnstableApi::class)
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -338,6 +340,8 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
     var text by remember { mutableStateOf("") }
     var full by remember { mutableStateOf(false) }
     var showPeople by remember { mutableStateOf(false) }
+    var lastBig by remember { mutableLongStateOf(0L) }
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     var myAvatar by remember { mutableStateOf(session.myAvatar) }
     var now by remember { mutableLongStateOf(session.serverNow()) }
     val systemLines = remember { mutableStateListOf<Line>() }
@@ -362,6 +366,9 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
     /** Até quando ignorar eventos do player (porque fui eu que mexi por causa da sala). */
     var suppressUntil by remember { mutableLongStateOf(0L) }
     var lastState by remember { mutableStateOf<PlayState?>(null) }
+    /** Horário (do servidor) em que a contagem 3, 2, 1 termina e o filme começa; 0 = sem contagem. */
+    var countdownAt by remember { mutableLongStateOf(0L) }
+    var countdownBy by remember { mutableStateOf("") }
 
     val player = remember {
         val http = OkHttpDataSource.Factory(AppGraph.driveHttp).setUserAgent("Estante-app")
@@ -383,6 +390,16 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
 
     fun applyRemote(st: PlayState) {
         lastState = st
+        if (PartySync.inCountdown(st, session.serverNow())) {
+            // Alguém deu play: fica parado no ponto certo e conta 3, 2, 1 junto.
+            suppressUntil = System.currentTimeMillis() + 900
+            if (PartySync.needsSeek(player.currentPosition / 1000.0, st.position, 0.3)) player.seekTo((st.position * 1000).toLong())
+            player.playWhenReady = false
+            countdownBy = people.firstOrNull { it.id == st.by }?.name.orEmpty()
+            countdownAt = st.at
+            return
+        }
+        countdownAt = 0
         val expected = PartySync.expected(st, session.serverNow())
         suppressUntil = System.currentTimeMillis() + 900
         if (PartySync.needsSeek(player.currentPosition / 1000.0, expected)) player.seekTo((expected * 1000).toLong())
@@ -394,7 +411,22 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
         val l = object : Player.Listener {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (System.currentTimeMillis() < suppressUntil) return
-                if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) mine(playWhenReady)
+                if (reason != Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) return
+                if (playWhenReady) {
+                    // Dei play: segura, avisa a sala e todo mundo começa junto depois de 3, 2, 1.
+                    suppressUntil = System.currentTimeMillis() + 900
+                    player.playWhenReady = false
+                    if (countdownAt > 0) return
+                    val pos = player.currentPosition / 1000.0
+                    val at = session.serverNow() + PartySync.COUNTDOWN_MS
+                    session.sendState(true, pos, at, countdown = true)
+                    lastState = PlayState(true, pos, at, session.me)
+                    countdownBy = ""
+                    countdownAt = at
+                } else {
+                    countdownAt = 0
+                    mine(false)
+                }
             }
 
             override fun onPositionDiscontinuity(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) {
@@ -413,6 +445,19 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
 
     // O que os outros fazem chega aqui.
     LaunchedEffect(remote) { remote?.let { applyRemote(it) } }
+
+    // Fim da contagem: começa a tocar (se ninguém pausou nesse meio-tempo).
+    LaunchedEffect(countdownAt) {
+        val at = countdownAt
+        if (at <= 0) return@LaunchedEffect
+        while (session.serverNow() < at) delay(40)
+        val st = lastState
+        if (countdownAt == at && st != null && st.playing && st.at == at) {
+            suppressUntil = System.currentTimeMillis() + 900
+            player.playWhenReady = true
+        }
+        if (countdownAt == at) countdownAt = 0
+    }
 
     // A cada 4 s confere se não escorregou (rede lenta, travadinha): mais de 1,5 s de diferença, ajusta.
     LaunchedEffect(Unit) {
@@ -503,6 +548,7 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Sair da sala", tint = Color.White)
             }
             FloatingReactions(reactions, since = session.startedAt - 5_000, serverNow = { session.serverNow() })
+            if (countdownAt > 0) Countdown(countdownAt, countdownBy) { session.serverNow() }
             // Teclado aberto: quem está na sala fica por cima do vídeo, no canto.
             if (imeVisible && !full) Row(Modifier.align(Alignment.BottomStart).padding(10.dp), horizontalArrangement = Arrangement.spacedBy((-8).dp)) {
                 onlineNow.take(5).forEach { p ->
@@ -579,7 +625,18 @@ private fun Room(video: Video, session: PartySession, onBack: () -> Unit) {
         ) {
             REACTIONS.forEach { e ->
                 Box(
-                    Modifier.size(44.dp).clip(CircleShape).background(Cinema.surface).clickable { session.sendReaction(e) },
+                    Modifier.size(44.dp).clip(CircleShape).background(Cinema.surface).combinedClickable(
+                        onClick = { session.sendReaction(e) },
+                        // Segurar: reação gigante (no máximo uma a cada 3 s).
+                        onLongClick = {
+                            val t = System.currentTimeMillis()
+                            if (t - lastBig >= 3_000) {
+                                lastBig = t
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                session.sendReaction(e, big = true)
+                            }
+                        },
+                    ),
                     contentAlignment = Alignment.Center,
                 ) { Text(e, fontSize = 22.sp) }
             }
@@ -665,18 +722,20 @@ private fun TypingDots() {
 @Composable
 fun FloatingReactions(reactions: List<Reaction>, since: Long, serverNow: () -> Long) {
     val shown = remember { mutableStateListOf<Pair<Reaction, Float>>() }
+    val bigs = remember { mutableStateListOf<Reaction>() }
     val seen = remember { mutableSetOf<String>() }
     LaunchedEffect(reactions) {
         val now = serverNow()
         reactions.filter { it.id !in seen && it.at >= since && now - it.at < 8_000 }.forEach {
             seen += it.id
-            shown += it to (0.15f + kotlin.random.Random.nextFloat() * 0.7f)
+            if (it.big) bigs += it else shown += it to (0.15f + kotlin.random.Random.nextFloat() * 0.7f)
         }
         reactions.forEach { seen += it.id }
     }
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
         val h = maxHeight
         val w = maxWidth
+        bigs.toList().forEach { r -> key("big-" + r.id) { BigReaction(r) { bigs.removeAll { it.id == r.id } } } }
         shown.toList().forEach { (r, x) ->
             key(r.id) {
                 val anim = remember { androidx.compose.animation.core.Animatable(0f) }
@@ -744,6 +803,70 @@ private fun PeopleDialog(people: List<Person>, me: String, myAvatar: String?, on
                 Spacer(Modifier.height(14.dp))
                 PillButton("Fechar", null, onClose, filled = false)
             }
+        }
+    }
+}
+
+/** Reação gigante: o emoji explode no meio da tela, com pedacinhos voando para os lados. */
+@Composable
+private fun BigReaction(r: Reaction, onDone: () -> Unit) {
+    val anim = remember { androidx.compose.animation.core.Animatable(0f) }
+    val bits = remember { List(12) { i -> (i / 12f) * 6.2832f + kotlin.random.Random.nextFloat() * 0.4f to (0.7f + kotlin.random.Random.nextFloat() * 0.6f) } }
+    LaunchedEffect(Unit) {
+        anim.animateTo(1f, androidx.compose.animation.core.tween(1800, easing = androidx.compose.animation.core.LinearOutSlowInEasing))
+        onDone()
+    }
+    val p = anim.value
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        bits.forEach { (a, d) ->
+            val dist = 130f * d * kotlin.math.min(1f, p * 1.3f)
+            Text(
+                r.emoji, fontSize = 28.sp,
+                modifier = Modifier.graphicsLayer {
+                    translationX = kotlin.math.cos(a) * dist * density
+                    translationY = kotlin.math.sin(a) * dist * density
+                    alpha = (1f - p).coerceIn(0f, 1f)
+                    rotationZ = a * 20f * p
+                },
+            )
+        }
+        val sc = when {
+            p < 0.18f -> 0.2f + p / 0.18f * 1.05f
+            p < 0.3f -> 1.25f - (p - 0.18f) / 0.12f * 0.25f
+            else -> 1f + (p - 0.3f) * 0.8f
+        }
+        Text(r.emoji, fontSize = 110.sp, modifier = Modifier.graphicsLayer { scaleX = sc; scaleY = sc; alpha = if (p < 0.75f) 1f else ((1f - p) / 0.25f).coerceIn(0f, 1f) })
+        Text(
+            r.name, color = Color.White, fontSize = 12.sp,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp).graphicsLayer { alpha = if (p < 0.7f) 1f else ((1f - p) / 0.3f).coerceIn(0f, 1f) }
+                .clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 8.dp, vertical = 2.dp),
+        )
+    }
+}
+
+/** Contagem 3, 2, 1 por cima do filme antes de começar junto. */
+@Composable
+private fun Countdown(at: Long, by: String, serverNow: () -> Long) {
+    val n by androidx.compose.runtime.produceState(PartySync.countdownNumber(at, serverNow()), at) {
+        while (true) { value = PartySync.countdownNumber(at, serverNow()); delay(50) }
+    }
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val pop = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(n) {
+        if (n <= 0) return@LaunchedEffect
+        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+        pop.snapTo(1.5f)
+        pop.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.5f, stiffness = 400f))
+    }
+    Box(Modifier.fillMaxSize().background(Color(0x8C0A071E)), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value; alpha = (2.5f - pop.value * 1.5f).coerceIn(0f, 1f) }
+                    .size(110.dp).clip(CircleShape).background(Cinema.accent.copy(alpha = 0.25f)).padding(10.dp).clip(CircleShape).background(Cinema.accent),
+                contentAlignment = Alignment.Center,
+            ) { Text(if (n > 0) "$n" else "▶", color = Cinema.onAccent, fontSize = 50.sp, fontWeight = FontWeight.ExtraBold) }
+            Spacer(Modifier.height(14.dp))
+            Text(if (by.isBlank()) "Começando junto…" else "$by deu o play", color = Color.White, fontSize = 14.sp)
         }
     }
 }

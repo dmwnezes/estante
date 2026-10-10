@@ -25,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -113,6 +114,24 @@ fun SettingsScreen(onBack: () -> Unit, onCheckUpdate: () -> Unit, updateAvailabl
                 )
                 Spacer(Modifier.height(14.dp))
                 PartySettings()
+            }
+
+            Section("Converter filmes no computador") {
+                Text(
+                    "O iPhone não toca AVI e alguns MKV. Este conversor gratuito (Windows) transforma os filmes de uma pasta em MP4, sem apagar os originais. Baixe no computador, descompacte na pasta dos filmes e dê dois cliques em “Converter para MP4”.",
+                    color = Cinema.muted, fontSize = 14.sp,
+                )
+                Spacer(Modifier.height(12.dp))
+                PillButton("Mandar o link para o computador", Icons.Rounded.Computer, {
+                    runCatching {
+                        context.startActivity(android.content.Intent.createChooser(
+                            android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                                .putExtra(android.content.Intent.EXTRA_SUBJECT, "Conversor para MP4 da Estante")
+                                .putExtra(android.content.Intent.EXTRA_TEXT, CONVERTER_URL),
+                            "Mandar o link para o computador",
+                        ))
+                    }
+                })
             }
 
             Section("Configurar o Google (uma vez só)") {
@@ -315,3 +334,6 @@ private fun PartySettings() {
     }, enabled = db.isNotBlank() && key.isNotBlank())
     status?.let { Text(it, color = if (ok || it == "Testando…") Cinema.accent else Cinema.red, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp)) }
 }
+
+/** Download do conversor (ferramentas/ no GitHub). */
+const val CONVERTER_URL = "https://github.com/dmwnezes/estante/raw/main/ferramentas/conversor-estante.zip"

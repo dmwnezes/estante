@@ -101,6 +101,7 @@
   .reacts { display: flex; justify-content: space-between; padding: 4px 12px 0; flex: none; }
   .reacts button { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--card); font-size: 22px; line-height: 1; padding: 0; cursor: pointer; transition: transform .12s; }
   .reacts button:active { transform: scale(1.25); }
+  .reacts button { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
   body.kb .reacts { display: none; }
   #typing { display: none; align-items: center; gap: 8px; padding: 2px 18px; color: var(--muted); font-size: 12px; flex: none; }
   #typing.on { display: flex; }
@@ -108,6 +109,21 @@
   .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: hop .9s infinite; }
   .dots i:nth-child(2) { animation-delay: .15s; } .dots i:nth-child(3) { animation-delay: .3s; }
   @keyframes hop { 0%, 60%, 100% { transform: none; opacity: .5 } 30% { transform: translateY(-4px); opacity: 1 } }
+  /* Contagem regressiva antes do play */
+  #countdown { position: absolute; inset: 0; z-index: 5; display: none; flex-direction: column; align-items: center; justify-content: center; background: rgba(10,7,30,.55); pointer-events: none; }
+  #countdown.on { display: flex; }
+  #countdown b { width: 96px; height: 96px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 52px; font-weight: 800; color: var(--on-accent); background: var(--accent); box-shadow: 0 0 0 10px rgba(155,140,255,.25); }
+  #countdown b.pop { animation: pop .9s ease-out; }
+  #countdown span { margin-top: 14px; color: #fff; font-size: 14px; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+  @keyframes pop { 0% { transform: scale(1.5); opacity: 0 } 25% { transform: scale(1); opacity: 1 } 100% { transform: scale(.92); opacity: 1 } }
+  /* Reação gigante (segurar o emoji) */
+  .boom { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+  .boom > b { font-size: 120px; line-height: 1; animation: boom 1.8s cubic-bezier(.2,.8,.3,1) forwards; }
+  .boom > span { position: absolute; bottom: 12%; padding: 2px 8px; border-radius: 8px; background: rgba(0,0,0,.45); color: #fff; font-size: 13px; animation: fade 1.8s forwards; }
+  .boom i { position: absolute; left: 50%; top: 50%; font-style: normal; font-size: 30px; line-height: 1; animation: burst 1.5s cubic-bezier(.1,.7,.3,1) forwards; }
+  @keyframes boom { 0% { transform: scale(.2); opacity: 0 } 18% { transform: scale(1.25); opacity: 1 } 30% { transform: scale(1) } 75% { opacity: 1 } 100% { transform: scale(1.6); opacity: 0 } }
+  @keyframes burst { 0% { transform: translate(-50%, -50%) scale(.3); opacity: 0 } 15% { opacity: 1 } 100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1) rotate(var(--r)); opacity: 0 } }
+  @keyframes fade { 0%, 70% { opacity: 1 } 100% { opacity: 0 } }
   #floats { position: absolute; inset: 0; z-index: 3; pointer-events: none; overflow: hidden; }
   .float { position: absolute; bottom: 30px; display: flex; flex-direction: column; align-items: center; animation: rise 2.6s cubic-bezier(.2,.6,.3,1) forwards; }
   .float b { font-size: 34px; line-height: 1; }
@@ -191,6 +207,7 @@
     <video id="video" playsinline controls preload="metadata"></video>
     <div class="overlay" id="overlay"></div>
     <div id="floats"></div>
+    <div id="countdown"><b id="cdNum">3</b><span id="cdText">Começando junto…</span></div>
     <div id="pdots"></div>
   </div>
   <div class="side">
@@ -295,6 +312,7 @@
   const expected = (s) => s.position + (s.playing ? Math.max(0, serverNow() - s.at) / 1000 : 0);
 
   function sendState(playing) {
+    if (!playing) stopCountdown();
     const s = { playing, position: video.currentTime, at: serverNow(), by: me, seq: Date.now() };
     lastState = s;
     api("PUT", "/state", s).catch(() => showConn(false));
@@ -319,15 +337,56 @@
   function doPause() { if (!video.paused) { mark("pause"); video.pause(); } }
   function applyRemote(s) {
     lastState = s;
+    // Play com contagem (o "at" ainda está no futuro): espera parado no ponto certo e conta 3, 2, 1.
+    if (s.playing && s.at - serverNow() > 300) { seekTo(s.position, 0.3); doPause(); runCountdown(s); return; }
+    stopCountdown();
     seekTo(expected(s));
     if (s.playing) doPlay(); else doPause();
+  }
+
+  // ---------- Contagem regressiva ----------
+  let cdState = null, cdTimer = 0, cdShown = 0;
+  function runCountdown(s) {
+    cdState = s;
+    clearInterval(cdTimer);
+    const who = s.by === me ? "" : (tree?.people?.[s.by]?.name || "");
+    $("cdText").textContent = who ? `${who} deu o play` : "Começando junto…";
+    $("countdown").classList.add("on");
+    cdShown = 0;
+    const tick = () => {
+      if (cdState !== s) return;
+      const rem = s.at - serverNow();
+      if (rem <= 0) { stopCountdown(); seekTo(s.position, 0.5); doPlay(); return; }
+      const n = Math.min(3, Math.ceil(rem / 1000));
+      if (n !== cdShown) {
+        cdShown = n;
+        const b = $("cdNum");
+        b.textContent = n; b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop");
+        if (navigator.vibrate) try { navigator.vibrate(30); } catch (_) {}
+      }
+    };
+    tick();
+    cdTimer = setInterval(tick, 50);
+  }
+  function stopCountdown() { cdState = null; clearInterval(cdTimer); $("countdown").classList.remove("on"); }
+  /** Dei play aqui: em vez de sair tocando, a sala inteira conta 3, 2, 1 e começa junto. */
+  function playWithCountdown() {
+    mark("pause"); video.pause();
+    const s = { playing: true, position: video.currentTime, at: serverNow() + 3000, by: me, seq: Date.now(), cd: true };
+    lastState = s;
+    api("PUT", "/state", s).catch(() => showConn(false));
+    runCountdown(s);
   }
   video.addEventListener("loadedmetadata", () => {
     if (pendingSeek == null) return;
     pendingSeek = null;
     if (lastState) seekTo(expected(lastState), 0.3);
   });
-  video.addEventListener("play", () => { if (!consume("play") && joined) sendState(true); });
+  video.addEventListener("play", () => {
+    if (consume("play") || !joined) return;
+    if (cdState) { mark("pause"); video.pause(); return; } // já está contando
+    playWithCountdown();
+  });
   video.addEventListener("pause", () => { if (!consume("pause") && joined && !video.seeking && !video.ended && video.readyState > 0) sendState(false); });
   video.addEventListener("seeked", () => { if (!consume("seek") && joined) sendState(!video.paused); });
   video.addEventListener("error", () => {
@@ -542,15 +601,35 @@
   const joinedAt = Date.now();
   const seenReactions = new Set();
   $("reacts").innerHTML = REACTIONS.map((e) => `<button type="button" aria-label="${e}">${e}</button>`).join("");
-  $("reacts").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
-    if (joined) api("POST", "/reactions", { e: b.textContent, name: myName, by: me, at: SV }).catch(showConn);
-  }));
+  // Toque = reação normal. Segurar = reação gigante (no máximo uma a cada 3 s).
+  let lastBig = 0;
+  const sendReaction = (e, big) => { if (joined) api("POST", "/reactions", big ? { e, name: myName, by: me, at: SV, big: true } : { e, name: myName, by: me, at: SV }).catch(showConn); };
+  $("reacts").querySelectorAll("button").forEach((b) => {
+    let timer = 0, long = false;
+    const start = (ev) => {
+      long = false;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        long = true;
+        if (Date.now() - lastBig < 3000) return;
+        lastBig = Date.now();
+        if (navigator.vibrate) try { navigator.vibrate(40); } catch (_) {}
+        sendReaction(b.textContent, true);
+      }, 450);
+    };
+    const end = () => clearTimeout(timer);
+    b.addEventListener("pointerdown", start);
+    ["pointerup", "pointerleave", "pointercancel"].forEach((t) => b.addEventListener(t, end));
+    b.addEventListener("contextmenu", (e) => e.preventDefault());
+    b.addEventListener("click", () => { if (long) { long = false; return; } sendReaction(b.textContent, false); });
+  });
   function renderReactions() {
     const r = (tree && tree.reactions) || {};
     for (const [id, x] of Object.entries(r)) {
       if (seenReactions.has(id)) continue;
       seenReactions.add(id);
       if (!REACTIONS.includes(x.e) || !x.at || x.at < serverNow() - 8000 || x.at < joinedAt + offset - 5000) continue;
+      if (x.big) { bigReaction(x); continue; }
       const el = document.createElement("div");
       el.className = "float";
       el.style.left = (12 + Math.random() * 70) + "%";
@@ -558,6 +637,20 @@
       $("floats").appendChild(el);
       setTimeout(() => el.remove(), 2700);
     }
+  }
+
+  function bigReaction(x) {
+    const el = document.createElement("div");
+    el.className = "boom";
+    let bits = "";
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2 + Math.random() * 0.4, d = 110 + Math.random() * 90;
+      bits += `<i style="--dx:${Math.round(Math.cos(a) * d)}px;--dy:${Math.round(Math.sin(a) * d)}px;--r:${Math.round(Math.random() * 120 - 60)}deg;animation-delay:${(Math.random() * 0.15).toFixed(2)}s">${x.e}</i>`;
+    }
+    el.innerHTML = `${bits}<b>${x.e}</b><span>${esc(x.name || "?")}</span>`;
+    $("floats").appendChild(el);
+    if (navigator.vibrate) try { navigator.vibrate([20, 40, 20]); } catch (_) {}
+    setTimeout(() => el.remove(), 2000);
   }
 
   // ---------- Digitando ----------
@@ -746,6 +839,7 @@
     video.play().then(() => {
       unlocked = true;
       if (lastState && !lastState.playing) doPause();
+      else if (lastState && lastState.at - serverNow() > 300) applyRemote(lastState);
       else if (lastState) seekTo(expected(lastState));
     }).catch((err) => {
       ignore.play = 0;

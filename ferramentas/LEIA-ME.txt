@@ -1,0 +1,26 @@
+ESTANTE - CONVERSOR PARA MP4  (criado por: @dmwnezes)
+=====================================================
+
+Para que serve
+  O iPhone (e o site da sala "Assistir junto") nao toca AVI e alguns MKV.
+  Este conversor transforma os filmes em MP4 que tocam em qualquer lugar.
+
+Como usar (Windows 10/11)
+  1. Descompacte este .zip dentro da pasta onde estao os filmes.
+  2. De dois cliques em "Converter para MP4.bat".
+     (Ou arraste uma pasta, ou alguns filmes, para cima dele.)
+  3. Os MP4 aparecem na subpasta "convertidos". Os originais continuam intactos.
+  4. Suba os MP4 (e os .srt, se tiver) para o Google Drive.
+
+Na primeira vez
+  - Se o ffmpeg (programa gratuito que faz a conversao) nao estiver instalado,
+    o conversor instala sozinho pelo winget. Se o Windows perguntar, aceite.
+  - Se o Windows avisar "O Windows protegeu o computador", clique em
+    "Mais informacoes" > "Executar assim mesmo".
+
+O que ele faz
+  - MKV com video H.264/HEVC: so troca a "caixa" para MP4 (segundos, sem perder qualidade).
+  - AVI, WMV, VP9 e outros: converte o video para H.264 (demora mais).
+  - Escolhe o audio em portugues/dublado quando houver, e converte para AAC estereo.
+  - Tira a legenda embutida (portugues de preferencia) para um .srt com o mesmo nome.
+  - Arquivo ja convertido e pulado; nada e apagado.

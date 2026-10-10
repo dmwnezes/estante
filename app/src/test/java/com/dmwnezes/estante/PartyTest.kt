@@ -81,4 +81,19 @@ class PartyTest {
         assertTrue(com.dmwnezes.estante.drive.DriveShare.explain(err("publishOutNotPermitted")).contains("empresa"))
         assertTrue(com.dmwnezes.estante.drive.DriveShare.explain(err("insufficientPermissions")).contains("permissão"))
     }
+
+    @Test
+    fun countdown() {
+        assertEquals(3, PartySync.countdownNumber(10_000, 7_000))
+        assertEquals(3, PartySync.countdownNumber(10_000, 7_500))
+        assertEquals(2, PartySync.countdownNumber(10_000, 8_200))
+        assertEquals(1, PartySync.countdownNumber(10_000, 9_999))
+        assertEquals(0, PartySync.countdownNumber(10_000, 10_000))
+        val s = PlayState(true, 30.0, 10_000, "x")
+        assertTrue(PartySync.inCountdown(s, 8_000))
+        assertFalse(PartySync.inCountdown(s, 9_900))
+        // Durante a contagem a posição esperada fica parada; depois anda normal.
+        assertEquals(30.0, PartySync.expected(s, 8_000), 0.001)
+        assertEquals(32.0, PartySync.expected(s, 12_000), 0.001)
+    }
 }

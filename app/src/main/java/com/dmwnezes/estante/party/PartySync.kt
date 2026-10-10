@@ -16,7 +16,7 @@ data class PlayState(
 data class Person(val id: String, val name: String, val lastSeen: Long, val platform: String, val avatar: String? = null)
 
 /** Emoji mandado na sala (sobe por cima do filme nos dois celulares). */
-data class Reaction(val id: String, val emoji: String, val name: String, val at: Long, val by: String)
+data class Reaction(val id: String, val emoji: String, val name: String, val at: Long, val by: String, val big: Boolean = false)
 
 /** Reações permitidas (as mesmas do site). */
 val REACTIONS = listOf("😂", "😱", "❤️", "👏", "😭", "🍿")
@@ -34,6 +34,18 @@ object PartySync {
         s.position + if (s.playing) (serverNow - s.at).coerceAtLeast(0) / 1000.0 else 0.0
 
     /** Diferença maior que isso, ajusta (menos que isso, ninguém percebe). */
+    /** Play com contagem regressiva: o horário de começar ainda está no futuro. */
+    fun inCountdown(s: PlayState, serverNow: Long) = s.playing && s.at - serverNow > 300
+
+    /** Número a mostrar na contagem (3, 2, 1), ou 0 se já passou. */
+    fun countdownNumber(at: Long, serverNow: Long): Int {
+        val rem = at - serverNow
+        return if (rem <= 0) 0 else kotlin.math.min(3L, (rem + 999) / 1000).toInt()
+    }
+
+    /** Tempo da contagem antes de começar a tocar. */
+    const val COUNTDOWN_MS = 3_000L
+
     fun needsSeek(local: Double, expected: Double, tolerance: Double = 1.0) = abs(local - expected) > tolerance
 
     /** Diferença entre o relógio do celular e o do servidor, a partir de uma ida e volta. */
